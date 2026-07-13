@@ -66,10 +66,8 @@ with col1:
     date_str = f"{date_input.day} {months_th[date_input.month-1]}{year_th}"
 
 with col2:
-    # 🟢 เปลี่ยนมาใช้ text_input เพื่อให้พิมพ์กรอกเลขเวลาเองได้เลย ไม่ต้องกดเลือกนาฬิกา
-    # ตั้งค่าเริ่มต้นให้ดึงเวลาปัจจุบัน ณ ตอนเปิดเว็บขึ้นมา (รูปแบบ เช่น 10.30)
     current_time_str = datetime.now().strftime("%H.%M")
-    time_str = st.text_input("กรอกเวลา (น.)", value=current_time_str, help="สามารถพิมพ์เปลี่ยนตัวเลขเวลาได้โดยตรง เช่น 09.15 หรือ 13.00")
+    time_str = st.text_input("กรอกเวลา (น.)", value=current_time_str)
 
 # --- 3. ผู้ปฏิบัติหน้าที่ ---
 st.markdown("### 👤 ผู้ปฏิบัติหน้าที่")
@@ -93,26 +91,36 @@ suffix = ""
 if with_team:
     suffix = " พร้อมด้วย" if has_team_names else " พร้อมพวก"
 
-# --- 4. รายละเอียดภารกิจ ---
+# --- 4. รายละเอียดภารกิจ (ปรับปรุง: รองรับหลายภารกิจ) ---
 st.markdown("### 📝 รายละเอียดภารกิจ")
-task_mode = st.radio("รูปแบบภารกิจ", ["เลือกจากรายการที่มีอยู่", "กรอกภารกิจใหม่เอง"])
+num_tasks = st.number_input("จำนวนภารกิจที่ต้องการรายงาน (กี่เรื่อง)", min_value=1, max_value=5, value=1, step=1)
 
-if task_mode == "เลือกจากรายการที่มีอยู่":
-    task_detail = st.selectbox("เลือกข้อความรายละเอียดภารกิจ", tasks_list)
-else:
-    new_detail = st.text_area("พิมพ์รายละเอียดข้อความรายงานฉบับเต็มที่นี่")
-    if st.button("💾 บันทึกภารกิจนี้เข้าสู่ตัวเลือกถาวร"):
-        if new_detail:
-            if new_detail not in tasks_list:
-                tasks_list.append(new_detail)
-                pd.DataFrame({"task_detail": tasks_list}).to_csv(TASKS_FILE, index=False)
-                st.success("บันทึกภารกิจใหม่เรียบร้อยและจำถาวรแล้ว!")
-                st.rerun()
+all_task_details = []
+
+for idx in range(int(num_tasks)):
+    st.markdown(f"**📍 ภารกิจเรื่องที่ {idx+1}**")
+    task_mode = st.radio(f"รูปแบบภารกิจที่ {idx+1}", ["เลือกจากรายการที่มีอยู่", "กรอกภารกิจใหม่เอง"], key=f"mode_{idx}")
+    
+    if task_mode == "เลือกจากรายการที่มีอยู่":
+        selected_task = st.selectbox(f"เลือกข้อความภารกิจที่ {idx+1}", tasks_list, key=f"select_{idx}")
+        all_task_details.append(selected_task)
+    else:
+        new_detail = st.text_area(f"พิมพ์รายละเอียดภารกิจที่ {idx+1} ฉบับเต็มที่นี่", key=f"text_{idx}")
+        if st.button(f"💾 บันทึกภารกิจเรื่องที่ {idx+1} นี้เข้าคลังถาวร", key=f"save_btn_{idx}"):
+            if new_detail:
+                if new_detail not in tasks_list:
+                    tasks_list.append(new_detail)
+                    pd.DataFrame({"task_detail": tasks_list}).to_csv(TASKS_FILE, index=False)
+                    st.success("บันทึกภารกิจใหม่เรียบร้อยและจำถาวรแล้ว!")
+                    st.rerun()
+                else:
+                    st.error("❌ มีข้อความภารกิจนี้อยู่ในระบบแล้ว")
             else:
-                st.error("❌ มีข้อความภารกิจนี้อยู่ในระบบแล้ว")
-        else:
-            st.warning("⚠️ กรุณากรอกรายละเอียดภารกิจก่อนกดบันทึก")
-    task_detail = new_detail
+                st.warning("⚠️ กรุณากรอกรายละเอียดภารกิจก่อนกดบันทึก")
+        all_task_details.append(new_detail)
+
+# รวมข้อความภารกิจทั้งหมดขึ้นบรรทัดใหม่ต่อกัน
+final_tasks_text = "\n".join([task for task in all_task_details if task])
 
 # --- 5. ประมวลผลและสร้างข้อความรายงาน (Output) ---
 st.markdown("---")
@@ -124,7 +132,7 @@ report_text = f"""สภ.ไม้แก่น
 เมื่อ {date_str} เวลาประมาณ {time_str} น.
 {main_officer['rank']}{main_officer['name']}
 {main_officer['position']}{suffix}{team_member_lines}
-{task_detail}
+{final_tasks_text}
    จึงเรียนมาเพื่อโปรดทราบ"""
 
 st.code(report_text, language="text")
