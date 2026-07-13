@@ -91,7 +91,7 @@ suffix = ""
 if with_team:
     suffix = " พร้อมด้วย" if has_team_names else " พร้อมพวก"
 
-# --- 4. รายละเอียดภารกิจ (ปรับปรุง: รองรับหลายภารกิจ) ---
+# --- 4. รายละเอียดภารกิจ ---
 st.markdown("### 📝 รายละเอียดภารกิจ")
 num_tasks = st.number_input("จำนวนภารกิจที่ต้องการรายงาน (กี่เรื่อง)", min_value=1, max_value=5, value=1, step=1)
 
@@ -99,28 +99,37 @@ all_task_details = []
 
 for idx in range(int(num_tasks)):
     st.markdown(f"**📍 ภารกิจเรื่องที่ {idx+1}**")
-    task_mode = st.radio(f"รูปแบบภารกิจที่ {idx+1}", ["เลือกจากรายการที่มีอยู่", "กรอกภารกิจใหม่เอง"], key=f"mode_{idx}")
     
-    if task_mode == "เลือกจากรายการที่มีอยู่":
-        selected_task = st.selectbox(f"เลือกข้อความภารกิจที่ {idx+1}", tasks_list, key=f"select_{idx}")
-        all_task_details.append(selected_task)
-    else:
-        new_detail = st.text_area(f"พิมพ์รายละเอียดภารกิจที่ {idx+1} ฉบับเต็มที่นี่", key=f"text_{idx}")
-        if st.button(f"💾 บันทึกภารกิจเรื่องที่ {idx+1} นี้เข้าคลังถาวร", key=f"save_btn_{idx}"):
-            if new_detail:
-                if new_detail not in tasks_list:
-                    tasks_list.append(new_detail)
-                    pd.DataFrame({"task_detail": tasks_list}).to_csv(TASKS_FILE, index=False)
-                    st.success("บันทึกภารกิจใหม่เรียบร้อยและจำถาวรแล้ว!")
-                    st.rerun()
-                else:
-                    st.error("❌ มีข้อความภารกิจนี้อยู่ในระบบแล้ว")
-            else:
-                st.warning("⚠️ กรุณากรอกรายละเอียดภารกิจก่อนกดบันทึก")
-        all_task_details.append(new_detail)
+    selected_task = st.selectbox(
+        f"พิมพ์คำค้นหาหรือเลือกข้อความภารกิจที่ {idx+1}", 
+        tasks_list, 
+        key=f"select_{idx}",
+        help="สามารถพิมพ์ค้นหาข้อความได้เลย"
+    )
+    if selected_task:
+        # 🟢 ตัวตรวจสอบข้อความอัตโนมัติ: ถ้าขึ้นต้นด้วย "ได้นำ" ให้เปลี่ยนเป็น "นำ" ทันที
+        processed_task = selected_task
+        if processed_task.startswith("ได้นำ"):
+            processed_task = processed_task.replace("ได้นำ", "นำ", 1)
+        all_task_details.append(processed_task)
 
-# รวมข้อความภารกิจทั้งหมดขึ้นบรรทัดใหม่ต่อกัน
-final_tasks_text = "\n".join([task for task in all_task_details if task])
+# ระบบพิมพ์เพิ่มกรณีไม่มีข้อความที่ต้องการในคลัง
+with st.expander("➕ กรณีต้องการพิมพ์ภารกิจใหม่นอกเหนือจากในคลังเพื่อบันทึกถาวร"):
+    new_detail = st.text_area("พิมพ์รายละเอียดภารกิจฉบับเต็มใหม่ที่นี่")
+    if st.button("💾 บันทึกเข้าคลังภารกิจถาวร"):
+        if new_detail:
+            if new_detail not in tasks_list:
+                tasks_list.append(new_detail)
+                pd.DataFrame({"task_detail": tasks_list}).to_csv(TASKS_FILE, index=False)
+                st.success("บันทึกภารกิจใหม่เข้าสู่ตัวเลือกถาวรเรียบร้อยแล้ว!")
+                st.rerun()
+            else:
+                st.error("❌ มีข้อความภารกิจนี้อยู่ในระบบแล้ว")
+        else:
+            st.warning("⚠️ กรุณากรอกรายละเอียดภารกิจก่อนกดบันทึก")
+
+# ประมวลผลรวมข้อความ: เคาะ 1 ทีแล้วใส่เครื่องหมายจุลภาคคั่นระหว่างเรื่อง
+final_tasks_text = " ,".join([task for task in all_task_details if task])
 
 # --- 5. ประมวลผลและสร้างข้อความรายงาน (Output) ---
 st.markdown("---")
