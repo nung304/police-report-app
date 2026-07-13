@@ -5,7 +5,7 @@ import os
 
 st.set_page_config(page_title="ระบบสร้างข้อความรายงาน สภ.ไม้แก่น", page_icon="👮‍♂️", layout="centered")
 st.title("👮‍♂️ ระบบข้อความรายงาน Line Group")
-st.subheader("งานสอบสวน สภ.ไม้แก่น (เวอร์ชันบันทึกถาวร)")
+st.subheader("งานสอบสวน สภ.ไม้แก่น")
 
 # ชื่อไฟล์สำหรับเก็บข้อมูลถาวร
 PERSONNEL_FILE = "personnel_data.csv"
@@ -13,12 +13,10 @@ TASKS_FILE = "tasks_data.csv"
 
 # --- 1. ฟังก์ชันโหลดและบันทึกข้อมูลระดับไฟล์ ---
 def load_data():
-    # ตรวจสอบและโหลดรายชื่อเจ้าหน้าที่
     if os.path.exists(PERSONNEL_FILE):
         df_p = pd.read_csv(PERSONNEL_FILE)
         personnel = df_p.to_dict(orient="records")
     else:
-        # ค่าเริ่มต้นหากยังไม่มีไฟล์
         personnel = [
             {"rank": "พ.ต.ท.", "name": "ปฐมพงศ์ ศีรษะพล", "position": "สว.(สอบสวน) สภ.ไม้แก่น"},
             {"rank": "ร.ต.อ.", "name": "สมเจต ทองแผ่น", "position": "รอง สว.(สอบสวน) สภ.นาประดู่ ปรก.สภ.ไม้แก่น"},
@@ -30,12 +28,10 @@ def load_data():
         ]
         pd.DataFrame(personnel).to_csv(PERSONNEL_FILE, index=False)
 
-    # ตรวจสอบและโหลดข้อความภารกิจ
     if os.path.exists(TASKS_FILE):
         df_t = pd.read_csv(TASKS_FILE)
         tasks = df_t["task_detail"].dropna().tolist()
     else:
-        # ค่าเริ่มต้นหากยังไม่มีไฟล์
         tasks = [
             "ได้นำตัวผู้ต้องหาคดียาเสพติด ส่งตัวฝากขังต่อศาลจังหวัดปัตตานี",
             "ได้รับมอบหมายจากพนักงานสอบสวน ยื่นคำร้องฝากขังต่อ ครั้งที่ 2,3 และ 4 ต่อศาลจังหวัดปัตตานี",
@@ -57,10 +53,7 @@ def load_data():
         
     return personnel, tasks
 
-# โหลดข้อมูลเข้าสู่แอปพลิเคชัน
 personnel_list, tasks_list = load_data()
-
-# สร้างตัวเลือกสำหรับ Dropdown รายชื่อเจ้าหน้าที่
 officer_options = {f"{p['rank']}{p['name']} ({p['position']})": p for p in personnel_list}
 
 # --- 2. วันที่และเวลาภารกิจ ---
@@ -81,14 +74,12 @@ st.markdown("### 👤 ผู้ปฏิบัติหน้าที่")
 main_officer_select = st.selectbox("เลือกผู้ปฏิบัติหลัก (คนแรก)", list(officer_options.keys()))
 main_officer = officer_options[main_officer_select]
 
-# ฟังก์ชันติ๊กพร้อมพวกและเลือกจำนวนคน
 with_team = st.checkbox("พร้อมพวก")
 team_member_lines = ""
 has_team_names = False
 
 if with_team:
     num_team = st.number_input("จำนวนผู้ปฏิบัติร่วม (กี่คน)", min_value=1, max_value=10, value=1, step=1)
-    
     for i in range(int(num_team)):
         team_select = st.selectbox(f"เลือกผู้ปฏิบัติร่วม คนที่ {i+1}", ["-- ไม่ระบุชื่อ (เว้นว่างไว้) --"] + list(officer_options.keys()), key=f"team_{i}")
         if team_select != "-- ไม่ระบุชื่อ (เว้นว่างไว้) --":
@@ -96,7 +87,6 @@ if with_team:
             team_member_lines += f"\n{member['rank']}{member['name']}\n{member['position']}"
             has_team_names = True
 
-# เงื่อนไขข้อความต่อท้ายตำแหน่งคนแรก
 suffix = ""
 if with_team:
     suffix = " พร้อมด้วย" if has_team_names else " พร้อมพวก"
@@ -109,11 +99,9 @@ if task_mode == "เลือกจากรายการที่มีอย
     task_detail = st.selectbox("เลือกข้อความรายละเอียดภารกิจ", tasks_list)
 else:
     new_detail = st.text_area("พิมพ์รายละเอียดข้อความรายงานฉบับเต็มที่นี่")
-    
     if st.button("💾 บันทึกภารกิจนี้เข้าสู่ตัวเลือกถาวร"):
         if new_detail:
             if new_detail not in tasks_list:
-                # บันทึกเพิ่มลงไฟล์ข้อความโดยตรง
                 tasks_list.append(new_detail)
                 pd.DataFrame({"task_detail": tasks_list}).to_csv(TASKS_FILE, index=False)
                 st.success("บันทึกภารกิจใหม่เรียบร้อยและจำถาวรแล้ว!")
@@ -140,18 +128,22 @@ report_text = f"""สภ.ไม้แก่น
 st.code(report_text, language="text")
 st.info("💡 สามารถกดไอคอนสี่เหลี่ยมซ้อนกันที่มุมขวาบนของกล่องข้อความเพื่อ Copy ไปวางในไลน์ได้ทันที!")
 
-# --- 6. เมนูพิเศษ: ระบบเพิ่มรายชื่อเจ้าหน้าที่แบบถาวร ---
-with st.expander("➕ คลิกเพื่อเพิ่มรายชื่อเจ้าหน้าที่ใหม่ (บันทึกถาวร)"):
-    with st.form("add_officer_form", clear_on_submit=True):
-        new_rank = st.text_input("ยศ (เช่น ด.ต. / ร.ต.อ.)")
-        new_name = st.text_input("ชื่อ-นามสกุล")
-        new_pos = st.text_input("ตำแหน่ง (เช่น ผบ.หมู่(นปพ.) สภ.ไม้แก่น ปฏิบัติหน้าที่ งานสอบสวน)")
-        submit_btn = st.form_submit_button("💾 บันทึกรายชื่อเจ้าหน้าที่")
-        
-        if submit_btn and new_rank and new_name and new_pos:
-            new_person = {"rank": new_rank, "name": new_name, "position": new_pos}
-            personnel_list.append(new_person)
-            # เขียนทับลงไฟล์ข้อความให้จำถาวร
-            pd.DataFrame(personnel_list).to_csv(PERSONNEL_FILE, index=False)
-            st.success(f"บันทึกรายชื่อ {new_rank}{new_name} ลงระบบถาวรสำเร็จ!")
-            st.rerun()
+# --- 6. เมนูพิเศษ: จัดการฐานข้อมูล (เพิ่ม/ลบ ข้อมูล) ---
+st.markdown("---")
+with st.expander("⚙️ เมนูจัดการข้อมูล (เพิ่มหรือลบ รายชื่อ/ภารกิจ)"):
+    
+    # ส่วนที่ 1: จัดการรายชื่อเจ้าหน้าที่
+    st.markdown("#### 👤 จัดการรายชื่อเจ้าหน้าที่")
+    col_add1, col_add2 = st.columns([2, 1])
+    
+    with col_add1:
+        with st.form("add_officer_form", clear_on_submit=True):
+            st.markdown("**➕ เพิ่มรายชื่อใหม่**")
+            new_rank = st.text_input("ยศ (เช่น ด.ต. / ร.ต.อ.)")
+            new_name = st.text_input("ชื่อ-นามสกุล")
+            new_pos = st.text_input("ตำแหน่ง")
+            submit_btn = st.form_submit_button("💾 บันทึกรายชื่อ")
+            
+            if submit_btn and new_rank and new_name and new_pos:
+                personnel_list.append({"rank": new_rank, "name": new_name, "position": new_pos})
+                pd.DataFrame(personnel_list
