@@ -103,32 +103,29 @@ for idx in range(int(num_tasks)):
     selected_task = st.selectbox(
         f"พิมพ์คำค้นหาหรือเลือกข้อความภารกิจที่ {idx+1}", 
         tasks_list, 
-        key=f"select_{idx}",
-        help="สามารถพิมพ์ค้นหาข้อความได้เลย"
+        key=f"select_{idx}"
     )
     if selected_task:
-        # 🟢 ตัวตรวจสอบข้อความอัตโนมัติ: ถ้าขึ้นต้นด้วย "ได้นำ" ให้เปลี่ยนเป็น "นำ" ทันที
         processed_task = selected_task
         if processed_task.startswith("ได้นำ"):
             processed_task = processed_task.replace("ได้นำ", "นำ", 1)
         all_task_details.append(processed_task)
 
-# ระบบพิมพ์เพิ่มกรณีไม่มีข้อความที่ต้องการในคลัง
-with st.expander("➕ กรณีต้องการพิมพ์ภารกิจใหม่นอกเหนือจากในคลังเพื่อบันทึกถาวร"):
+# ระบบพิมพ์เพิ่มด่วนกรณีไม่มีข้อความที่ต้องการในคลัง
+with st.expander("➕ พิมพ์ภารกิจใหม่นอกเหนือจากในคลังเพื่อบันทึกถาวร"):
     new_detail = st.text_area("พิมพ์รายละเอียดภารกิจฉบับเต็มใหม่ที่นี่")
     if st.button("💾 บันทึกเข้าคลังภารกิจถาวร"):
         if new_detail:
             if new_detail not in tasks_list:
                 tasks_list.append(new_detail)
                 pd.DataFrame({"task_detail": tasks_list}).to_csv(TASKS_FILE, index=False)
-                st.success("บันทึกภารกิจใหม่เข้าสู่ตัวเลือกถาวรเรียบร้อยแล้ว!")
+                st.success("บันทึกภารกิจใหม่เรียบร้อยแล้ว!")
                 st.rerun()
             else:
                 st.error("❌ มีข้อความภารกิจนี้อยู่ในระบบแล้ว")
         else:
             st.warning("⚠️ กรุณากรอกรายละเอียดภารกิจก่อนกดบันทึก")
 
-# ประมวลผลรวมข้อความ: เคาะ 1 ทีแล้วใส่เครื่องหมายจุลภาคคั่นระหว่างเรื่อง
 final_tasks_text = " ,".join([task for task in all_task_details if task])
 
 # --- 5. ประมวลผลและสร้างข้อความรายงาน (Output) ---
@@ -147,45 +144,102 @@ report_text = f"""สภ.ไม้แก่น
 st.code(report_text, language="text")
 st.info("💡 สามารถกดไอคอนสี่เหลี่ยมซ้อนกันที่มุมขวาบนของกล่องข้อความเพื่อ Copy ไปวางในไลน์ได้ทันที!")
 
-# --- 6. เมนูพิเศษ: จัดการฐานข้อมูล (เพิ่ม/ลบ ข้อมูล) ---
-st.markdown("---")
-with st.expander("⚙️ เมนูจัดการข้อมูล (เพิ่มหรือลบ รายชื่อ/ภารกิจ)"):
-    
-    st.markdown("#### 👤 จัดการรายชื่อเจ้าหน้าที่")
-    col_add1, col_add2 = st.columns([2, 1])
-    
-    with col_add1:
-        with st.form("add_officer_form", clear_on_submit=True):
-            st.markdown("**➕ เพิ่มรายชื่อใหม่**")
-            new_rank = st.text_input("ยศ (เช่น ด.ต. / ร.ต.อ.)")
-            new_name = st.text_input("ชื่อ-นามสกุล")
-            new_pos = st.text_input("ตำแหน่ง")
-            submit_btn = st.form_submit_button("💾 บันทึกรายชื่อ")
-            
-            if submit_btn and new_rank and new_name and new_pos:
-                personnel_list.append({"rank": new_rank, "name": new_name, "position": new_pos})
-                pd.DataFrame(personnel_list).to_csv(PERSONNEL_FILE, index=False)
-                st.success(f"บันทึกรายชื่อ {new_rank}{new_name} สำเร็จ!")
-                st.rerun()
-                
-    with col_add2:
-        st.markdown("**🗑️ ลบรายชื่อที่มีอยู่**")
-        officer_to_delete = st.selectbox("เลือกชื่อที่ต้องการลบ", ["-- เลือกเพื่อลบ --"] + list(officer_options.keys()))
-        if officer_to_delete != "-- เลือกเพื่อลบ --":
-            if st.button("❌ ยืนยันลบรายชื่อนี้", type="primary"):
-                target = officer_options[officer_to_delete]
-                personnel_list = [p for p in personnel_list if not (p['name'] == target['name'] and p['rank'] == target['rank'])]
-                pd.DataFrame(personnel_list).to_csv(PERSONNEL_FILE, index=False)
-                st.success("ลบรายชื่อเรียบร้อยแล้ว!")
-                st.rerun()
 
-    st.markdown("---")
+# --- 6. เมนูพิเศษ: แผงควบคุมและแก้ไขจัดการฐานข้อมูลอัจฉริยะ ---
+st.markdown("---")
+with st.expander("⚙️ เมนูจัดการข้อมูลอย่างละเอียด (เพิ่ม / แก้ไข / ลบ รายชื่อและภารกิจ)"):
     
-    st.markdown("#### 📝 จัดการข้อความภารกิจ")
-    task_to_delete = st.selectbox("เลือกข้อความภารกิจที่ต้องการลบ", ["-- เลือกเพื่อลบ --"] + tasks_list)
-    if task_to_delete != "-- เลือกเพื่อลบ --":
-        if st.button("❌ ยืนยันลบภารกิจนี้", type="primary"):
-            tasks_list.remove(task_to_delete)
-            pd.DataFrame({"task_detail": tasks_list}).to_csv(TASKS_FILE, index=False)
-            st.success("ลบข้อความภารกิจเรียบร้อยแล้ว!")
+    # ==================== ส่วนที่ 1: จัดการรายชื่อตำรวจ ====================
+    st.markdown("### 👤 1. จัดการรายชื่อเจ้าหน้าที่")
+    
+    # ฟอร์มเพิ่มรายชื่อใหม่
+    with st.form("new_officer_form", clear_on_submit=True):
+        st.markdown("**➕ เพิ่มรายชื่อใหม่ลงระบบถาวร**")
+        c1, c2, c3 = st.columns([1, 2, 3])
+        n_rank = c1.text_input("ยศ")
+        n_name = c2.text_input("ชื่อ-นามสกุล")
+        n_pos = c3.text_input("ตำแหน่ง")
+        btn_add_p = st.form_submit_button("💾 บันทึกรายชื่อใหม่")
+        if btn_add_p and n_rank and n_name and n_pos:
+            personnel_list.append({"rank": n_rank, "name": n_name, "position": n_pos})
+            pd.DataFrame(personnel_list).to_csv(PERSONNEL_FILE, index=False)
+            st.success("บันทึกรายชื่อสำเร็จ!")
             st.rerun()
+
+    st.markdown("**📋 รายชื่อทั้งหมดในระบบปัจจุบัน (สามารถกด แก้ไข หรือ ลบ ได้ที่ตารางด้านล่าง)**")
+    # แสดงตารางพร้อมปุ่มแก้ไข/ลบ รายบุคคล
+    for p_idx, person in enumerate(personnel_list):
+        p_col1, p_col2, p_col3, p_col4, p_col5 = st.columns([1, 2, 4, 1, 1])
+        p_col1.write(person['rank'])
+        p_col2.write(person['name'])
+        p_col3.write(person['position'])
+        
+        # ปุ่มแก้ไขรายชื่อ
+        if p_col4.button("✏️", key=f"edit_p_{p_idx}"):
+            st.session_state[f"editing_p_{p_idx}"] = True
+            
+        # ปุ่มลบรายชื่อ
+        if p_col5.button("🗑️", key=f"del_p_{p_idx}"):
+            personnel_list.pop(p_idx)
+            pd.DataFrame(personnel_list).to_csv(PERSONNEL_FILE, index=False)
+            st.success("ลบรายชื่อเรียบร้อย!")
+            st.rerun()
+            
+        # ถ้าเปิดโหมดแก้ไขสำหรับคนนี้
+        if st.session_state.get(f"editing_p_{p_idx}", False):
+            with st.container():
+                st.markdown(f"**🛠️ กำลังแก้ไขข้อมูลของ: {person['rank']}{person['name']}**")
+                e_rank = st.text_input("แก้ไขยศ", value=person['rank'], key=f"er_{p_idx}")
+                e_name = st.text_input("แก้ไขชื่อ-สกุล", value=person['name'], key=f"en_{p_idx}")
+                e_pos = st.text_input("แก้ไขตำแหน่ง", value=person['position'], key=f"ep_{p_idx}")
+                if st.button("💾 บันทึกการแก้ไข", key=f"save_p_{p_idx}"):
+                    personnel_list[p_idx] = {"rank": e_rank, "name": e_name, "position": e_pos}
+                    pd.DataFrame(personnel_list).to_csv(PERSONNEL_FILE, index=False)
+                    st.session_state[f"editing_p_{p_idx}"] = False
+                    st.success("อัปเดตข้อมูลสำเร็จ!")
+                    st.rerun()
+
+    # ==================== ส่วนที่ 2: จัดการข้อความภารกิจ ====================
+    st.markdown("---")
+    st.markdown("### 📝 2. จัดการคลังข้อความภารกิจ")
+    
+    st.markdown("**📋 รายการภารกิจทั้งหมดในระบบ (สามารถกด แก้ไข หรือ ลบ ได้ที่รายการด้านล่าง)**")
+    for t_idx, task in enumerate(tasks_list):
+        t_col1, t_col2, t_col3 = st.columns([7, 1, 1])
+        t_col1.write(f"{t_idx+1}. {task}")
+        
+        # ปุ่มแก้ไขภารกิจ
+        if t_col2.button("✏️", key=f"edit_t_{t_idx}"):
+            st.session_state[f"editing_t_{t_idx}"] = True
+            
+        # ปุ่มลบภารกิจ
+        if t_col3.button("🗑️", key=f"del_t_{t_idx}"):
+            tasks_list.pop(t_idx)
+            pd.DataFrame({"task_detail": tasks_list}).to_csv(TASKS_FILE, index=False)
+            st.success("ลบภารกิจเรียบร้อย!")
+            st.rerun()
+            
+        # ถ้าเปิดโหมดแก้ไขสำหรับภารกิจนี้
+        if st.session_state.get(f"editing_t_{t_idx}", False):
+            with st.container():
+                st.markdown(f"**🛠️ กำลังแก้ไขข้อความภารกิจที่ {t_idx+1}**")
+                e_task = st.text_area("แก้ไขข้อความภารกิจ", value=task, key=f"et_text_{t_idx}")
+                if st.button("💾 บันทึกการแก้ไขข้อความ", key=f"save_t_{t_idx}"):
+                    tasks_list[t_idx] = e_task
+                    pd.DataFrame({"task_detail": tasks_list}).to_csv(TASKS_FILE, index=False)
+                    st.session_state[f"editing_t_{t_idx}"] = False
+                    st.success("อัปเดตข้อความสำเร็จ!")
+                    st.rerun()
+
+    # ==================== ส่วนที่ 3: ระบบสำรองข้อมูลดาวน์โหลด ====================
+    st.markdown("---")
+    st.markdown("### 📥 3. ดาวน์โหลดไฟล์สำรองข้อมูล (CSV)")
+    col_dl1, col_dl2 = st.columns(2)
+    with col_dl1:
+        if os.path.exists(PERSONNEL_FILE):
+            with open(PERSONNEL_FILE, "rb") as f:
+                st.download_button("📂 ดาวน์โหลดไฟล์รายชื่อทั้งหมด", f, file_name=PERSONNEL_FILE, mime="text/csv")
+    with col_dl2:
+        if os.path.exists(TASKS_FILE):
+            with open(TASKS_FILE, "rb") as f:
+                st.download_button("📂 ดาวน์โหลดไฟล์ภารกิจทั้งหมด", f, file_name=TASKS_FILE, mime="text/csv")
