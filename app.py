@@ -19,16 +19,42 @@ def get_image_base64(image_file):
     encoded = base64.b64encode(image_file.read()).decode()
     return f"data:image/png;base64,{encoded}"
 
-# --- ส่วนควบคุม CSS พื้นหลังและกล่องโปร่งแสงในแต่ละคอลัมน์ ---
-if "bg_image_base64" not in st.session_state:
-    st.session_state["bg_image_base64"] = None
+# --- 1. เชื่อมต่อฐานข้อมูล NoSQL (Firebase Firestore) ---
+@st.cache_resource
+def get_firestore_client():
+    credentials_info = st.secrets["firebase"]
+    creds = service_account.Credentials.from_service_account_info(credentials_info)
+    db = firestore.Client(credentials=creds, project=credentials_info["project_id"])
+    return db
 
-# สร้าง CSS dynamically
+db = get_firestore_client()
+
+# --- 2. ฟังก์ชันโหลดและบันทึกภาพพื้นหลังจาก Cloud ---
+def load_background_image():
+    # ดึงเอกสารชื่อ 'current_bg' จากคอลเลกชัน 'settings'
+    doc_ref = db.collection("settings").document("current_bg")
+    doc = doc_ref.get()
+    if doc.exists:
+        return doc.to_dict().get("image_base64", None)
+    return None
+
+def save_background_image(image_base64):
+    doc_ref = db.collection("settings").document("current_bg")
+    doc_ref.set({"image_base64": image_base64})
+
+def delete_background_image():
+    doc_ref = db.collection("settings").document("current_bg")
+    doc_ref.delete()
+
+# โหลดภาพพื้นหลังจากฐานข้อมูลขึ้นมาแสดงผล (ไม่มีหายตอนรีเฟรช)
+bg_image_base64 = load_background_image()
+
+# --- ส่วนควบคุม CSS พื้นหลังและกล่องโปร่งแสงในแต่ละคอลัมน์ ---
 bg_style = ""
-if st.session_state["bg_image_base64"]:
+if bg_image_base64:
     bg_style = f"""
         .stApp {{
-            background-image: url("{st.session_state["bg_image_base64"]}");
+            background-image: url("{bg_image_base64}");
             background-size: cover;
             background-position: center;
             background-attachment: fixed;
@@ -93,17 +119,7 @@ st.markdown(f"""
 st.markdown("<h2 style='text-align: center; color: #0c2340; margin-bottom: 0;'>👮‍♂️ ระบบรายงาน Line Group</h2>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center; color: #666; font-size: 0.95rem; margin-bottom: 20px;'>งานสอบสวน สภ.ไม้แก่น (ระบบฐานข้อมูล NoSQL Cloud)</p>", unsafe_allow_html=True)
 
-# --- 1. เชื่อมต่อฐานข้อมูล NoSQL (Firebase Firestore) ---
-@st.cache_resource
-def get_firestore_client():
-    credentials_info = st.secrets["firebase"]
-    creds = service_account.Credentials.from_service_account_info(credentials_info)
-    db = firestore.Client(credentials=creds, project=credentials_info["project_id"])
-    return db
-
-db = get_firestore_client()
-
-# --- 2. ฟังก์ชัน โหลด/บันทึก และ จัดลำดับยศตำรวจ ---
+# --- 3. ฟังก์ชัน โหลด/บันทึก และ จัดลำดับยศตำรวจ ---
 def get_rank_priority(rank_str):
     ranks_priority = {
         "พล.ต.อ.": 1, "พล.ต.ท.": 2, "พล.ต.ต.": 3,
@@ -174,7 +190,6 @@ main_col1, main_col2, main_col3 = st.columns([1, 1, 1.1])
 
 # ----------------- คอลัมน์ที่ 1: วันที่เวลา / เจ้าหน้าที่ -----------------
 with main_col1:
-    # ใช้ st.container ครอบวิดเจ็ตทั้งหมดในคอลัมน์ และกำหนดสไตล์โปร่งแสงผ่าน CSS ด้านบน
     with st.container(border=True):
         st.markdown("### ⏱️ วันที่และเวลาภารกิจ")
         sub_col1, sub_col2 = st.columns(2)
@@ -353,13 +368,14 @@ st.markdown("<br>", unsafe_allow_html=True)
 with st.expander("🖼️ ตั้งค่า/อัปโหลดภาพพื้นหลังเว็บ (Background Settings)"):
     uploaded_bg = st.file_uploader("อัปโหลดภาพใหม่เพื่อเปลี่ยนพื้นหลัง", type=["jpg", "jpeg", "png"], key="bg_uploader")
     if uploaded_bg:
-        st.session_state["bg_image_base64"] = get_image_base64(uploaded_bg)
-        st.toast("🎉 เปลี่ยนภาพพื้นหลังของระบบเรียบร้อยแล้ว!", icon="🖼️")
+        new_bg_base64 = get_image_base64(uploaded_bg)
+        save_background_image(new_bg_base64)
+        st.toast("🎉 บันทึกภาพพื้นหลังเข้าสู่ Cloud สำเร็จ!", icon="🖼️")
         time.sleep(1)
         st.rerun()
-    elif st.session_state["bg_image_base64"] is not None:
+    elif bg_image_base64 is not None:
         if st.button("❌ ลบภาพพื้นหลัง (กลับไปใช้พื้นหลังสีเทาขาวปกติ)"):
-            st.session_state["bg_image_base64"] = None
-            st.toast("🧹 รีเซ็ตพื้นหลังระบบเรียบร้อยแล้ว!", icon="✅")
+            delete_background_image()
+            st.toast("🧹 รีเซ็ตพื้นหลังระบบบนคลาวด์เรียบร้อยแล้ว!", icon="✅")
             time.sleep(1)
             st.rerun()
