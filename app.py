@@ -74,7 +74,7 @@ if "selected_color_mode" not in st.session_state:
     st.session_state["selected_color_mode"] = "โหมดกล่องขาว ตัวอักษรเข้ม (สำหรับรูปพื้นหลังสีมืด)"
 
 if "selected_opacity" not in st.session_state:
-    st.session_state["selected_opacity"] = 90
+    st.session_state["selected_opacity"] = 80
 
 # แถบควบคุมด้านบนสุด
 ctrl_col1, ctrl_col2 = st.columns([2, 1])
@@ -105,22 +105,20 @@ with ctrl_col2:
 # คำนวณค่า Alpha (ความโปร่งแสง 0.0 - 1.0)
 alpha = opacity_percent / 100.0
 
-# กำหนดสไตล์ CSS ตามที่ผู้ใช้งานตั้งค่าไว้
+# กำหนดสไตล์ CSS ตามที่ผู้ใช้งานตั้งค่าไว้ (โหมดกล่องขาว และ โหมดกล่องดำ)
 if "สำหรับรูปพื้นหลังสีมืด" in st.session_state["selected_color_mode"]:
-    # โหมดกล่องขาว และตัวอักษรสีน้ำเงินเข้ม
     card_bg = f"rgba(255, 255, 255, {alpha})"
     text_color = "#0c2340"
     label_color = "#0c2340"
-    border_color = f"rgba(12, 35, 64, {min(alpha + 0.1, 1.0)})"
-    shadow_color = "rgba(0, 0, 0, 0.2)"
+    border_color = f"rgba(12, 35, 64, {min(alpha + 0.15, 1.0)})"
+    shadow_color = "rgba(0, 0, 0, 0.25)"
     input_bg = "#ffffff"
     input_text = "#111111"
 else:
-    # โหมดกล่องดำ และตัวอักษรสีขาวสว่าง
     card_bg = f"rgba(15, 23, 42, {alpha})"
     text_color = "#ffffff"
     label_color = "#38bdf8"  # สีฟ้าสว่าง
-    border_color = f"rgba(56, 189, 248, {min(alpha + 0.1, 1.0)})"
+    border_color = f"rgba(56, 189, 248, {min(alpha + 0.15, 1.0)})"
     shadow_color = "rgba(0, 0, 0, 0.5)"
     input_bg = "#1e293b"
     input_text = "#ffffff"
@@ -142,7 +140,7 @@ if bg_image_base64:
             left: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(12, 35, 64, 0.25); 
+            background-color: rgba(12, 35, 64, 0.2); 
             z-index: -1;
         }}
     """
@@ -151,48 +149,62 @@ st.markdown(f"""
     <style>
         {bg_style}
         
-        /* สไตล์บังคับกล่อง Container ทั้ง 3 คอลัมน์ */
+        /* สไตล์บังคับกล่อง Container ทั้ง 3 คอลัมน์หลักตามรูปแบบวงกลมสีแดง */
         div[data-testid="stVerticalBlockBorderWrapper"] {{
             background-color: {card_bg} !important;
             border-radius: 16px !important;
             border: 2px solid {border_color} !important;
             box-shadow: 0 10px 30px {shadow_color} !important;
-            padding: 18px !important;
-            backdrop-filter: blur(8px); /* เพิ่มเอฟเฟกต์กระจกฝ้าเมื่อโปร่งแสงเพื่อให้ดูพรีเมียมและอ่านง่ายขึ้น */
+            padding: 24px !important;
+            backdrop-filter: blur(6px); /* เอฟเฟกต์กระจกฝ้าเมื่อมีการปรับลดความทึบแสง */
+            margin-bottom: 20px !important;
         }}
         
-        /* สไตล์ตัวอักษรหัวข้อภายในกล่อง */
+        /* ตั้งค่ากล่อง Container ชั้นในไม่ให้มีสีทับซ้อน เพื่อให้กล่องนอกใบเดียวคุมทั้งหมด */
+        div[data-testid="stVerticalBlock"] > div > div[data-testid="stVerticalBlockBorderWrapper"] {{
+            background-color: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            padding: 0px !important;
+        }}
+        
+        /* สไตล์ตัวอักษรหัวข้อหลัก (เช่น วันที่และเวลาภารกิจ, รายละเอียดภารกิจ) */
         h3 {{
             color: {text_color} !important;
-            border-left: 5px solid {text_color};
-            padding-left: 10px;
+            border-left: 6px solid {text_color};
+            padding-left: 12px;
             font-weight: bold !important;
+            margin-top: 0px !important;
+            margin-bottom: 20px !important;
         }}
         
-        /* สไตล์ชื่อหัวข้อของช่องกรอกข้อมูลต่างๆ */
+        /* สไตล์ชื่อหัวข้อของช่องกรอกข้อมูลย่อยภายในกล่อง */
         label[data-testid="stWidgetLabel"] p {{
             color: {label_color} !important;
             font-weight: bold !important;
+            font-size: 1.05rem !important;
         }}
         
-        /* สไตล์ข้อความทั่วไปและการแจ้งเตือน */
+        /* สไตล์ข้อความทั่วไปในหน้าเว็บ */
         .block-container p {{
             color: {text_color} !important;
         }}
         
-        /* บังคับช่องกรอกข้อมูล (Input & Selectbox) ให้สีชัดเจนตามโหมด */
+        /* บังคับช่องกรอกข้อมูลย่อย (Input & Selectbox) ให้สีกลมกลืนชัดเจน */
         div[data-baseweb="select"] > div, div[data-baseweb="input"] > div, input, select {{
             background-color: {input_bg} !important;
             color: {input_text} !important;
+            border-radius: 8px !important;
         }}
         
-        /* สไตล์กล่องผลลัพธ์ Code Block สำหรับก๊อปปี้ */
+        /* สไตล์กล่องผลลัพธ์ Code Block สีขาวเข้มคมชัดสำหรับก๊อปปี้ไปแอป Line */
         div[data-testid="stCodeBlock"] {{
             border: 2px solid #0c2340;
             background-color: #ffffff !important;
+            border-radius: 10px !important;
         }}
         div[data-testid="stCodeBlock"] span {{
-            color: #111111 !important; /* บังคับตัวอักษรในส่วนที่จะก๊อปปี้ไปส่งไลน์ให้เป็นสีดำเข้มคมชัดเสมอ */
+            color: #111111 !important; /* ตัวอักษรสีเข้มจัดเพื่อให้มองเห็นได้ง่ายขณะคัดลอก */
         }}
         
         /* สไตล์ปุ่มกดหลัก */
@@ -204,9 +216,13 @@ st.markdown(f"""
             color: white !important;
             font-weight: bold;
             border: none;
+            transition: 0.3s;
+        }}
+        .stButton>button:hover {{
+            background-color: #1d3557 !important;
         }}
         
-        /* ปรับแต่งส่วนหัวข้อหลักสุดของแอป */
+        /* ปรับแต่งส่วนหัวข้อหลักของโปรแกรม */
         .main-title {{
             text-align: center; 
             color: { '#ffffff' if bg_image_base64 else '#0c2340' }; 
@@ -219,7 +235,7 @@ st.markdown(f"""
             color: { '#f0f0f0' if bg_image_base64 else '#666666' }; 
             text-shadow: 1px 1px 5px rgba(0,0,0,0.7);
             font-size: 0.95rem; 
-            margin-bottom: 20px;
+            margin-bottom: 25px;
         }}
         
         .block-container {{
