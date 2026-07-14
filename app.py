@@ -4,6 +4,7 @@ import google.auth
 from google.cloud import firestore
 from google.oauth2 import service_account
 import time
+import base64
 
 # ตั้งค่าหน้าจอให้เป็นแบบ "กว้างพิเศษ (Wide)" เพื่อให้แสดงผล 3 คอลัมน์บน PC ได้สวยงามพอดี
 st.set_page_config(
@@ -13,8 +14,39 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ปรับแต่ง CSS สำหรับปรับปรุง UI/UX ปุ่มกด และจัดระเบียบหน้าตาให้พรีเมียม
-st.markdown("""
+# --- ฟังก์ชันแปลงไฟล์ภาพที่อัปโหลดเป็น Base64 เพื่อใช้ใน CSS ---
+def get_image_base64(image_file):
+    encoded = base64.b64encode(image_file.read()).decode()
+    return f"data:image/png;base64,{encoded}"
+
+# --- ส่วนควบคุม CSS พื้นหลัง ---
+bg_css = ""
+# เพิ่มกล่องสำหรับอัปโหลดภาพพื้นหลังไว้ใน Session State
+if "bg_image_base64" not in st.session_state:
+    st.session_state["bg_image_base64"] = None
+
+# ปรับแต่ง CSS หลัก และตั้งค่าพื้นหลังหากมีการอัปโหลดรูปภาพ
+if st.session_state["bg_image_base64"]:
+    bg_css = f"""
+    <style>
+        .stApp {{
+            background-image: url("{st.session_state["bg_image_base64"]}");
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+        }}
+        /* เพิ่มกล่องโปร่งแสงทับพื้นหลังเพื่อให้ตัวหนังสืออ่านง่ายขึ้นบนทุกพื้นหลัง */
+        .block-container {{
+            background-color: rgba(255, 255, 255, 0.92);
+            border-radius: 15px;
+            padding: 2rem !important;
+            margin-top: 1.5rem !important;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }}
+    </style>
+    """
+
+st.markdown(bg_css + """
     <style>
         /* สไตล์ปุ่มกดหลัก */
         .stButton>button {
@@ -70,14 +102,12 @@ db = get_firestore_client()
 
 # --- 2. ฟังก์ชัน โหลด/บันทึก และ จัดลำดับยศตำรวจ ---
 def get_rank_priority(rank_str):
-    # กำหนดค่าน้ำหนักความสำคัญในการเรียงลำดับยศจากสูงไปต่ำ
     ranks_priority = {
         "พล.ต.อ.": 1, "พล.ต.ท.": 2, "พล.ต.ต.": 3,
         "พ.ต.อ.": 4, "พ.ต.ท.": 5, "พ.ต.ต.": 6,
         "ร.ต.อ.": 7, "ร.ต.ท.": 8, "ร.ต.ต.": 9,
         "ด.ต.": 10, "จ.ส.ต.": 11, "ส.ต.อ.": 12, "ส.ต.ท.": 13, "ส.ต.ต.": 14
     }
-    # ถ้ายศไหนไม่ตรงตามเงื่อนไขด้านบน ให้หล่นไปอยู่ท้ายสุด (เช่น พนักงานราชการ หรือคำอื่นๆ)
     return ranks_priority.get(rank_str.strip(), 99)
 
 def load_personnel():
@@ -102,7 +132,6 @@ def load_personnel():
             db.collection("personnel").add(p)
         st.rerun()
         
-    # ทำการเรียงลำดับตามยศ (Rank) จากสูงไปต่ำก่อนส่งข้อมูลออกไปใช้งาน
     personnel.sort(key=lambda x: get_rank_priority(x["rank"]))
     return personnel
 
@@ -129,7 +158,6 @@ def load_tasks():
 personnel_list = load_personnel()
 tasks_data = load_tasks()
 
-# รักษาลำดับที่เรียงยศแล้วไว้ตอนเข้าทำ Options dict
 officer_options = {}
 for p in personnel_list:
     key_name = f"{p['rank']}{p['name']} ({p['position']})"
@@ -141,8 +169,19 @@ tasks_list = [t["task_detail"] for t in tasks_data]
 # ==================== แบ่งหน้าจอออกเป็น 3 คอลัมน์ใหญ่ ====================
 main_col1, main_col2, main_col3 = st.columns([1, 1, 1.1])
 
-# ----------------- คอลัมน์ที่ 1: วันที่เวลา / เจ้าหน้าที่ -----------------
+# ----------------- คอลัมน์ที่ 1: วันที่เวลา / เจ้าหน้าที่ / เปลี่ยนพื้นหลัง -----------------
 with main_col1:
+    # ฟีเจอร์อัปโหลดเปลี่ยนภาพพื้นหลัง
+    st.markdown("### 🖼️ ภาพพื้นหลังระบบ")
+    uploaded_bg = st.file_uploader("อัปโหลดภาพเพื่อตั้งเป็นพื้นหลังเว็บ", type=["jpg", "jpeg", "png"], key="bg_uploader")
+    if uploaded_bg:
+        st.session_state["bg_image_base64"] = get_image_base64(uploaded_bg)
+        st.rerun()
+    elif st.session_state["bg_image_base64"] is not None:
+        if st.button("❌ ลบภาพพื้นหลัง (ใช้พื้นหลังปกติ)"):
+            st.session_state["bg_image_base64"] = None
+            st.rerun()
+
     st.markdown("### ⏱️ วันที่และเวลาภารกิจ")
     sub_col1, sub_col2 = st.columns(2)
     with sub_col1:
@@ -196,7 +235,6 @@ with main_col2:
                 processed_task = processed_task.replace("ได้นำ", "นำ", 1)
             all_task_details.append(processed_task)
 
-    # ปุ่มเพิ่มคลังภารกิจด่วนแบบย่อเนื้อที่
     with st.expander("➕ เพิ่มภารกิจใหม่บันทึกเข้าฐานข้อมูล"):
         new_detail = st.text_area("พิมพ์รายละเอียดภารกิจใหม่ที่นี่")
         if st.button("💾 บันทึกภารกิจถาวร"):
@@ -211,7 +249,6 @@ with main_col2:
             else:
                 st.warning("⚠️ กรุณากรอกข้อความ")
 
-    # จัดรูปแบบตามเงื่อนไข (เรื่องเดียวไม่มีขีด / หลายเรื่องใส่ - และขึ้นบรรทัดใหม่)
     final_tasks_text = ""
     valid_tasks = [task for task in all_task_details if task]
 
