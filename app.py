@@ -5,6 +5,8 @@ from google.cloud import firestore
 from google.oauth2 import service_account
 import time
 import base64
+from PIL import Image
+import io
 
 # ตั้งค่าหน้าจอให้เป็นแบบ "กว้างพิเศษ (Wide)" เพื่อให้แสดงผล 3 คอลัมน์บน PC ได้สวยงามพอดี
 st.set_page_config(
@@ -14,10 +16,26 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- ฟังก์ชันแปลงไฟล์ภาพที่อัปโหลดเป็น Base64 เพื่อใช้ใน CSS ---
-def get_image_base64(image_file):
-    encoded = base64.b64encode(image_file.read()).decode()
-    return f"data:image/png;base64,{encoded}"
+# --- ฟังก์ชันย่อขนาดภาพและแปลงเป็น Base64 เพื่อป้องกันปัญหาไฟล์เกิน 1MB ใน Firestore ---
+def process_and_get_base64(image_file):
+    # เปิดรูปภาพด้วย Pillow
+    img = Image.open(image_file)
+    
+    # 1. ปรับขนาดรูปภาพ (Resize) ให้มีความกว้างสูงสุดไม่เกิน 1280px (รักษาอัตราส่วนภาพเดิม)
+    max_size = 1280
+    img.thumbnail((max_size, max_size))
+    
+    # แปลงภาพจากโหมด RGBA (ถ้ามี) เป็น RGB เพื่อเซฟเป็น JPEG
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+        
+    # 2. บีบอัดคุณภาพภาพ (Compress) ให้เหลือ 65% เพื่อให้ขนาดไฟล์เล็กลงมาก แต่ยังดูคมชัดสวยงามบนจอ
+    buffered = io.BytesIO()
+    img.save(buffered, format="JPEG", quality=65, optimize=True)
+    
+    # แปลงเป็น Base64
+    encoded = base64.b64encode(buffered.getvalue()).decode()
+    return f"data:image/jpeg;base64,{encoded}"
 
 # --- 1. เชื่อมต่อฐานข้อมูล NoSQL (Firebase Firestore) ---
 @st.cache_resource
@@ -31,7 +49,6 @@ db = get_firestore_client()
 
 # --- 2. ฟังก์ชันโหลดและบันทึกภาพพื้นหลังจาก Cloud ---
 def load_background_image():
-    # ดึงเอกสารชื่อ 'current_bg' จากคอลเลกชัน 'settings'
     doc_ref = db.collection("settings").document("current_bg")
     doc = doc_ref.get()
     if doc.exists:
@@ -46,7 +63,7 @@ def delete_background_image():
     doc_ref = db.collection("settings").document("current_bg")
     doc_ref.delete()
 
-# โหลดภาพพื้นหลังจากฐานข้อมูลขึ้นมาแสดงผล (ไม่มีหายตอนรีเฟรช)
+# โหลดภาพพื้นหลังจากฐานข้อมูลขึ้นมาแสดงผล
 bg_image_base64 = load_background_image()
 
 # --- ส่วนควบคุม CSS พื้นหลังและกล่องโปร่งแสงในแต่ละคอลัมน์ ---
@@ -368,7 +385,8 @@ st.markdown("<br>", unsafe_allow_html=True)
 with st.expander("🖼️ ตั้งค่า/อัปโหลดภาพพื้นหลังเว็บ (Background Settings)"):
     uploaded_bg = st.file_uploader("อัปโหลดภาพใหม่เพื่อเปลี่ยนพื้นหลัง", type=["jpg", "jpeg", "png"], key="bg_uploader")
     if uploaded_bg:
-        new_bg_base64 = get_image_base64(uploaded_bg)
+        # ใช้ฟังก์ชันใหม่ในการย่อภาพและบีบอัดไฟล์ให้อยู่ในเซฟโซน (< 200KB) ป้องกัน Error
+        new_bg_base64 = process_and_get_base64(uploaded_bg)
         save_background_image(new_bg_base64)
         st.toast("🎉 บันทึกภาพพื้นหลังเข้าสู่ Cloud สำเร็จ!", icon="🖼️")
         time.sleep(1)
