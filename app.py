@@ -5,15 +5,15 @@ from google.cloud import firestore
 from google.oauth2 import service_account
 import time
 
-# ตั้งค่าหน้าเว็บให้รองรับมือถือและซ่อนเมนูที่ไม่จำเป็นเพื่อความสะอาดตา
+# ตั้งค่าหน้าจอให้เป็นแบบ "กว้างพิเศษ (Wide)" เพื่อให้แสดงผล 3 คอลัมน์บน PC ได้สวยงามพอดี
 st.set_page_config(
     page_title="รายงานสอบสวน สภ.ไม้แก่น", 
     page_icon="👮‍♂️", 
-    layout="centered",
+    layout="wide",  # ปรับเป็น wide เพื่อให้เต็มหน้าจอ PC
     initial_sidebar_state="collapsed"
 )
 
-# ปรับแต่ง CSS เพื่อให้หน้าตาบนมือถือดูพรีเมียม ปุ่มกดง่ายขึ้น และฟอนต์อ่านง่าย
+# ปรับแต่ง CSS สำหรับปรับปรุง UI/UX ปุ่มกด และจัดระเบียบหน้าตาให้พรีเมียม
 st.markdown("""
     <style>
         /* สไตล์ปุ่มกดหลัก */
@@ -39,14 +39,14 @@ st.markdown("""
         }
         /* หัวข้อย่อยให้มีระยะห่างที่พอดี */
         h3 {
-            margin-top: 1.5rem !important;
+            margin-top: 1rem !important;
             margin-bottom: 0.8rem !important;
             font-size: 1.25rem !important;
             color: #0c2340;
             border-left: 5px solid #0c2340;
             padding-left: 10px;
         }
-        /* ลดช่องว่างส่วนหัวเว็บบนมือถือ */
+        /* ลดช่องว่างส่วนหัวเว็บบนมือถือและ PC */
         .block-container {
             padding-top: 1.5rem !important;
             padding-bottom: 2rem !important;
@@ -118,90 +118,95 @@ tasks_data = load_tasks()
 officer_options = {f"{p['rank']}{p['name']} ({p['position']})": p for p in personnel_list}
 tasks_list = [t["task_detail"] for t in tasks_data]
 
-# --- 3. วันที่และเวลาภารกิจ ---
-st.markdown("### ⏱️ วันที่และเวลาภารกิจ")
-col1, col2 = st.columns(2)
-with col1:
-    date_input = st.date_input("📅 เลือกวันที่", datetime.now())
-    months_th = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]
-    year_th = str(date_input.year + 543)[2:]
-    date_str = f"{date_input.day} {months_th[date_input.month-1]}{year_th}"
 
-with col2:
-    current_time_str = datetime.now().strftime("%H.%M")
-    time_str = st.text_input("⏰ กรอกเวลา (น.)", value=current_time_str)
+# ==================== แบ่งหน้าจอออกเป็น 3 คอลัมน์ใหญ่ ====================
+main_col1, main_col2, main_col3 = st.columns([1, 1, 1.1])
 
-# --- 4. ผู้ปฏิบัติหน้าที่ ---
-st.markdown("### 👤 เจ้าหน้าที่ผู้ปฏิบัติงาน")
-main_officer_select = st.selectbox("👮‍♂️ เลือกผู้ปฏิบัติหลัก (คนแรก)", list(officer_options.keys()))
-main_officer = officer_options[main_officer_select]
+# ----------------- คอลัมน์ที่ 1: วันที่เวลา / เจ้าหน้าที่ -----------------
+with main_col1:
+    st.markdown("### ⏱️ วันที่และเวลาภารกิจ")
+    sub_col1, sub_col2 = st.columns(2)
+    with sub_col1:
+        date_input = st.date_input("📅 เลือกวันที่", datetime.now())
+        months_th = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]
+        year_th = str(date_input.year + 543)[2:]
+        date_str = f"{date_input.day} {months_th[date_input.month-1]}{year_th}"
+    with sub_col2:
+        current_time_str = datetime.now().strftime("%H.%M")
+        time_str = st.text_input("⏰ กรอกเวลา (น.)", value=current_time_str)
 
-with_team = st.checkbox("➕ มีผู้ปฏิบัติร่วม (พร้อมพวก/พร้อมด้วย)", value=False)
-team_member_lines = ""
-has_team_names = False
+    st.markdown("### 👤 เจ้าหน้าที่ผู้ปฏิบัติงาน")
+    main_officer_select = st.selectbox("👮‍♂️ เลือกผู้ปฏิบัติหลัก (คนแรก)", list(officer_options.keys()))
+    main_officer = officer_options[main_officer_select]
 
-if with_team:
-    st.info("💡 ระบุจำนวนและเลือกรายชื่อผู้ร่วมทีมด้านล่าง:")
-    num_team = st.number_input("จำนวนผู้ปฏิบัติร่วม (คน)", min_value=1, max_value=10, value=1, step=1)
-    
-    for i in range(int(num_team)):
-        team_select = st.selectbox(f"👤 เลือกผู้ร่วมปฏิบัติงานคนที่ {i+1}", ["-- ไม่ระบุชื่อ (ใช้คำว่าพร้อมพวกเฉยๆ) --"] + list(officer_options.keys()), key=f"team_{i}")
-        if team_select != "-- ไม่ระบุชื่อ (ใช้คำว่าพร้อมพวกเฉยๆ) --":
-            member = officer_options[team_select]
-            team_member_lines += f"\n{member['rank']}{member['name']}\n{member['position']}"
-            has_team_names = True
+    with_team = st.checkbox("➕ มีผู้ปฏิบัติร่วม (พร้อมพวก/พร้อมด้วย)", value=False)
+    team_member_lines = ""
+    has_team_names = False
 
-suffix = ""
-if with_team:
-    suffix = " พร้อมด้วย" if has_team_names else " พร้อมพวก"
+    if with_team:
+        num_team = st.number_input("จำนวนผู้ปฏิบัติร่วม (คน)", min_value=1, max_value=10, value=1, step=1)
+        for i in range(int(num_team)):
+            team_select = st.selectbox(f"👤 เลือกผู้ปฏิบัติร่วมคนที่ {i+1}", ["-- ไม่ระบุชื่อ (ใช้พร้อมพวก) --"] + list(officer_options.keys()), key=f"team_{i}")
+            if team_select != "-- ไม่ระบุชื่อ (ใช้พร้อมพวก) --":
+                member = officer_options[team_select]
+                team_member_lines += f"\n{member['rank']}{member['name']}\n{member['position']}"
+                has_team_names = True
 
-# --- 5. รายละเอียดภารกิจ ---
-st.markdown("### 📝 รายละเอียดภารกิจ")
-num_tasks = st.number_input("📌 จำนวนภารกิจที่ต้องการรายงาน (เรื่อง)", min_value=1, max_value=5, value=1, step=1)
+    suffix = ""
+    if with_team:
+        suffix = " พร้อมด้วย" if has_team_names else " พร้อมพวก"
 
-all_task_details = []
 
-for idx in range(int(num_tasks)):
-    st.markdown(f"**📍 ภารกิจเรื่องที่ {idx+1}**")
-    selected_task = st.selectbox(
-        f"เลือกหรือค้นหาข้อความภารกิจที่ {idx+1}", 
-        [""] + tasks_list, 
-        key=f"select_{idx}"
-    )
-    if selected_task:
-        processed_task = selected_task
-        if processed_task.startswith("ได้นำ"):
-            processed_task = processed_task.replace("ได้นำ", "นำ", 1)
-        all_task_details.append(processed_task)
+# ----------------- คอลัมน์ที่ 2: รายละเอียดภารกิจ -----------------
+with main_col2:
+    st.markdown("### 📝 รายละเอียดภารกิจ")
+    num_tasks = st.number_input("📌 จำนวนภารกิจที่ต้องการรายงาน (เรื่อง)", min_value=1, max_value=5, value=1, step=1)
 
-# เพิ่มคลังภารกิจพร้อม Popup เตือน
-with st.expander("➕ เพิ่มภารกิจใหม่นอกเหนือจากในคลัง เพื่อใช้ในครั้งถัดไป"):
-    new_detail = st.text_area("พิมพ์รายละเอียดภารกิจใหม่ที่นี่")
-    if st.button("💾 บันทึกภารกิจถาวร"):
-        if new_detail:
-            if new_detail not in tasks_list:
-                db.collection("tasks").add({"task_detail": new_detail})
-                st.toast("🎉 เพิ่มภารกิจใหม่ลงฐานข้อมูลสำเร็จ!", icon="💾")
-                time.sleep(1)
-                st.rerun()
+    all_task_details = []
+
+    for idx in range(int(num_tasks)):
+        st.markdown(f"**📍 ภารกิจเรื่องที่ {idx+1}**")
+        selected_task = st.selectbox(
+            f"เลือกหรือค้นหาข้อความภารกิจที่ {idx+1}", 
+            [""] + tasks_list, 
+            key=f"select_{idx}"
+        )
+        if selected_task:
+            processed_task = selected_task
+            if processed_task.startswith("ได้นำ"):
+                processed_task = processed_task.replace("ได้นำ", "นำ", 1)
+            all_task_details.append(processed_task)
+
+    # ปุ่มเพิ่มคลังภารกิจด่วนแบบย่อเนื้อที่
+    with st.expander("➕ เพิ่มภารกิจใหม่บันทึกเข้าฐานข้อมูล"):
+        new_detail = st.text_area("พิมพ์รายละเอียดภารกิจใหม่ที่นี่")
+        if st.button("💾 บันทึกภารกิจถาวร"):
+            if new_detail:
+                if new_detail not in tasks_list:
+                    db.collection("tasks").add({"task_detail": new_detail})
+                    st.toast("🎉 เพิ่มภารกิจใหม่สำเร็จ!", icon="💾")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error("❌ มีภารกิจนี้ในคลังแล้ว")
             else:
-                st.error("❌ มีภารกิจนี้ในคลังแล้ว")
-        else:
-            st.warning("⚠️ กรุณากรอกข้อความก่อนบันทึก")
+                st.warning("⚠️ กรุณากรอกข้อความ")
 
-# จัดรูปแบบตามเงื่อนไข (เรื่องเดียวไม่มีขีด / หลายเรื่องใส่ - และขึ้นบรรทัดใหม่)
-final_tasks_text = ""
-valid_tasks = [task for task in all_task_details if task]
+    # จัดรูปแบบตามเงื่อนไข (เรื่องเดียวไม่มีขีด / หลายเรื่องใส่ - และขึ้นบรรทัดใหม่)
+    final_tasks_text = ""
+    valid_tasks = [task for task in all_task_details if task]
 
-if len(valid_tasks) == 1:
-    final_tasks_text = valid_tasks[0]
-elif len(valid_tasks) > 1:
-    final_tasks_text = "\n".join([f"- {task}" for task in valid_tasks])
+    if len(valid_tasks) == 1:
+        final_tasks_text = valid_tasks[0]
+    elif len(valid_tasks) > 1:
+        final_tasks_text = "\n".join([f"- {task}" for task in valid_tasks])
 
-# --- 6. ประมวลผลและสร้างข้อความรายงาน (Output) ---
-st.markdown("### 📋 ข้อความรายงานสำหรับส่ง Line Group")
 
-report_text = f"""สภ.ไม้แก่น 
+# ----------------- คอลัมน์ที่ 3: ข้อความรายงานสำหรับส่ง -----------------
+with main_col3:
+    st.markdown("### 📋 ข้อความรายงานสำหรับส่ง Line")
+
+    report_text = f"""สภ.ไม้แก่น 
 งานสอบสวน
 เรียน ผู้บังคับบัญชา
 เมื่อ {date_str} เวลาประมาณ {time_str} น.
@@ -210,12 +215,13 @@ report_text = f"""สภ.ไม้แก่น
 {final_tasks_text}
    จึงเรียนมาเพื่อโปรดทราบ"""
 
-st.code(report_text, language="text")
-st.success("👆 แตะปุ่มไอคอนสี่เหลี่ยมซ้อนกันที่มุมขวาบนของข้อความด้านบนเพื่อ Copy ไปส่งใน Line ได้ทันที!")
+    st.code(report_text, language="text")
+    st.success("👆 แตะปุ่มไอคอนสี่เหลี่ยมซ้อนกันที่มุมขวาบนของรายงานด้านบนเพื่อ Copy ได้ทันที!")
 
-# --- 7. แผงควบคุมจัดการฐานข้อมูล NoSQL แบบซ่อนไว้ประหยัดเนื้อที่ ---
+
+# --- แผงควบคุมและแก้ไขจัดการฐานข้อมูล NoSQL ด้านล่างสุด (กว้างเต็มจอเหมือนเดิมเพื่อไม่ให้รกคอลัมน์) ---
 st.markdown("---")
-with st.expander("⚙️ ตั้งค่าระบบ (เพิ่ม / แก้ไข / ลบ รายชื่อและภารกิจ)"):
+with st.expander("⚙️ ตั้งค่าระบบหลังบ้าน (เพิ่ม / แก้ไข / ลบ รายชื่อและภารกิจบนคลาวด์)"):
     
     # จัดการรายชื่อตำรวจ
     st.markdown("#### 👤 1. จัดการรายชื่อเจ้าหน้าที่")
