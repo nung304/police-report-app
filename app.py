@@ -83,11 +83,21 @@ bg_style = ""
 if bg_image_base64:
     bg_style = f"""
         .stApp {{
-            /* ซ้อนแผ่นฟิล์มสีน้ำเงินเข้มโปร่งแสง (40%) เพื่อดึงข้อความให้เด่นชัดขึ้นโดยอัตโนมัติ */
-            background: linear-gradient(rgba(12, 35, 64, 0.4), rgba(12, 35, 64, 0.4)), url("{bg_image_base64}");
+            background-image: url("{bg_image_base64}");
             background-size: cover;
             background-position: center;
             background-attachment: fixed;
+        }}
+        /* สร้างแผ่นฟิล์มสีน้ำเงินเข้มโปร่งแสงทับหน้าจอทั้งหมดเพื่อช่วยให้กล่องสีขาวดูลอยขึ้นมาชัดเจน */
+        .stApp::before {{
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(12, 35, 64, 0.45); /* สีน้ำเงินเข้มโปร่งแสง 45% */
+            z-index: -1;
         }}
     """
 
@@ -100,25 +110,28 @@ st.markdown(f"""
             width: 100%;
             border-radius: 10px;
             height: 3em;
-            background-color: #0c2340;
-            color: white;
+            background-color: #0c2340 !important;
+            color: white !important;
             font-weight: bold;
             border: none;
             transition: 0.3s;
         }}
         .stButton>button:hover {{
-            background-color: #1d3557;
-            color: #f1faee;
+            background-color: #1d3557 !important;
+            color: #f1faee !important;
         }}
         
         /* สไตล์กรอบกล่องสำหรับข้อมูลรายงาน */
         div[data-testid="stCodeBlock"] {{
             border-radius: 12px;
             border: 2px solid #0c2340;
-            background-color: #f8f9fa;
+            background-color: #ffffff !important;
+        }}
+        div[data-testid="stCodeBlock"] span {{
+            color: #111111 !important; /* บังคับตัวอักษรในกล่องก็อปปี้ให้เป็นสีดำเข้ม */
         }}
         
-        /* สไตล์ข้อความหัวข้อเรื่องภายในหน้าเว็บให้เป็นสีที่ชัดเจน */
+        /* สไตล์ข้อความทั่วไปในหน้าเว็บให้เป็นสีที่ชัดเจน */
         .block-container p {{
             color: #111111 !important;
             font-weight: 500;
@@ -132,43 +145,52 @@ st.markdown(f"""
             color: #0c2340 !important;
             border-left: 5px solid #0c2340;
             padding-left: 10px;
+            font-weight: bold !important;
         }}
         
-        /* เพิ่มความทึบแสงของกล่องขาว (เป็น 94%) และทำขอบให้ชัดเจนขึ้นเพื่อสู้กับแสงพื้นหลัง */
+        /* บังคับคอลัมน์และกล่อง Container ทั้งหมดให้เป็นพื้นหลังสีขาวเกือบขาวทึบ (97%) เพื่อแยกตัวอักษรออกจากพื้นหลังมืด */
         div[data-testid="stVerticalBlockBorderWrapper"] {{
-            background-color: rgba(255, 255, 255, 0.94) !important;
-            border-radius: 15px !important;
-            border: 1px solid rgba(12, 35, 64, 0.15) !important;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12) !important;
-            padding: 12px !important;
+            background-color: rgba(255, 255, 255, 0.97) !important;
+            border-radius: 16px !important;
+            border: 2px solid rgba(12, 35, 64, 0.2) !important;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25) !important;
+            padding: 18px !important;
         }}
         
-        /* สไตล์ตัวอักษรของ Label ช่องกรอกต่างๆ ให้เข้มคมชัด */
-        label p {{
+        /* แก้ไขตัวอักษรหัวข้อของช่องกรอกต่างๆ (เช่น วันที่ เวลา เลือกเจ้าหน้าที่) */
+        label[data-testid="stWidgetLabel"] p {{
             color: #0c2340 !important;
-            font-weight: 600 !important;
+            font-weight: bold !important;
+            font-size: 1rem !important;
         }}
         
         /* จัดข้อความส่วนสปอยเลอร์/Expander */
         .stExpander {{
-            background-color: rgba(255, 255, 255, 0.9) !important;
+            background-color: rgba(255, 255, 255, 0.98) !important;
             border-radius: 10px;
+            border: 1px solid rgba(12, 35, 64, 0.15) !important;
         }}
         
         /* ปรับแต่งส่วนหัวข้อหลักสุดของแอป (กรณีมีภาพพื้นหลังจะใช้ตัวอักษรสีขาวสว่างเด่นชัด) */
         .main-title {{
             text-align: center; 
             color: { '#ffffff' if bg_image_base64 else '#0c2340' }; 
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.6);
+            text-shadow: 2px 2px 8px rgba(0,0,0,0.85);
             margin-bottom: 0;
             font-weight: bold;
         }}
         .main-subtitle {{
             text-align: center; 
-            color: { '#e0e0e0' if bg_image_base64 else '#666666' }; 
-            text-shadow: 1px 1px 3px rgba(0,0,0,0.5);
+            color: { '#f0f0f0' if bg_image_base64 else '#666666' }; 
+            text-shadow: 1px 1px 5px rgba(0,0,0,0.7);
             font-size: 0.95rem; 
             margin-bottom: 20px;
+        }}
+        
+        /* บังคับให้ข้อความสปอยเลอร์ของ Expander อ่านง่าย */
+        .stExpander details summary p {{
+            color: #0c2340 !important;
+            font-weight: bold !important;
         }}
         
         /* ลดช่องว่างส่วนหัวเว็บบนมือถือและ PC */
