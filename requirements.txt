@@ -1,2 +1,2 @@
-st-gsheets-connection
-pandas
+google-cloud-firestore
+google-auth
