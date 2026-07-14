@@ -52,11 +52,11 @@ st.markdown("""
             padding-bottom: 2rem !important;
         }
     </style>
-""", unsafe_allowed_html=True)
+""", unsafe_allow_html=True)
 
 # ส่วนหัวหลักของแอปพลิเคชัน
-st.markdown("<h2 style='text-align: center; color: #0c2340; margin-bottom: 0;'>👮‍♂️ ระบบรายงาน Line Group</h2>", unsafe_allowed_html=True)
-st.markdown("<p style='text-align: center; color: #666; font-size: 0.95rem; margin-bottom: 20px;'>งานสอบสวน สภ.ไม้แก่น (ระบบฐานข้อมูล NoSQL Cloud)</p>", unsafe_allowed_html=True)
+st.markdown("<h2 style='text-align: center; color: #0c2340; margin-bottom: 0;'>👮‍♂️ ระบบรายงาน Line Group</h2>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #666; font-size: 0.95rem; margin-bottom: 20px;'>งานสอบสวน สภ.ไม้แก่น (ระบบฐานข้อมูล NoSQL Cloud)</p>", unsafe_allow_html=True)
 
 # --- 1. เชื่อมต่อฐานข้อมูล NoSQL (Firebase Firestore) ---
 @st.cache_resource
