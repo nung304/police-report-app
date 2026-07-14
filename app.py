@@ -19,31 +19,20 @@ st.set_page_config(
 # --- ฟังก์ชันย่อขนาดภาพระดับ HD และแปลงเป็น Base64 แบบคำนวณขนาดไฟล์อัตโนมัติ ---
 def process_and_get_base64(image_file):
     img = Image.open(image_file)
-    
-    # 1. เพิ่มความละเอียดขึ้นเป็นระดับ Full HD (1920px) เพื่อความคมชัดสูงบนหน้าจอคอมพิวเตอร์
     max_size = 1920
     img.thumbnail((max_size, max_size))
-    
-    # แปลงภาพจากโหมด RGBA (ถ้ามี) เป็น RGB เพื่อเซฟเป็น JPEG
     if img.mode in ("RGBA", "P"):
         img = img.convert("RGB")
-        
-    # 2. ปรับคุณภาพเริ่มต้นขึ้นเป็น 85% (ระดับคุณภาพมาตรฐานสูง ภาพไม่แตก)
     quality = 85
     step = 5
-    
-    # ลูปเพื่อหาจุดที่ภาพชัดที่สุดแต่ขนาดไฟล์ปลอดภัยสำหรับ Firestore (< 950 KB)
     while quality > 30:
         buffered = io.BytesIO()
         img.save(buffered, format="JPEG", quality=quality, optimize=True)
         file_size = len(buffered.getvalue())
-        
         if file_size < 950000:
             encoded = base64.b64encode(buffered.getvalue()).decode()
             return f"data:image/jpeg;base64,{encoded}"
-            
         quality -= step
-
     buffered = io.BytesIO()
     img.save(buffered, format="JPEG", quality=30, optimize=True)
     encoded = base64.b64encode(buffered.getvalue()).decode()
@@ -78,7 +67,35 @@ def delete_background_image():
 # โหลดภาพพื้นหลังจากฐานข้อมูลขึ้นมาแสดงผล
 bg_image_base64 = load_background_image()
 
-# --- ส่วนควบคุม CSS พื้นหลัง, ตัวอักษร และแผ่นเลเยอร์ฟิล์มลดความจ้าของรูปภาพ ---
+# --- ปุ่มปรับโหมดสีอัจฉริยะ (วางไว้ด้านบนสุดเพื่อให้เลือกตามใจชอบ) ---
+# โดยจะสร้างตัวเลือกให้เหมาะสมกับพื้นหลังของระบบ
+color_mode = st.radio(
+    "🎨 ปรับโหมดสีตัวอักษรและกล่องข้อมูล (เลือกให้ตัดกับรูปภาพพื้นหลังของคุณ)",
+    ["โหมดกล่องขาว ตัวอักษรเข้ม (สำหรับรูปพื้นหลังสีมืด)", "โหมดกล่องดำ ตัวอักษรขาว (สำหรับรูปพื้นหลังสีสว่าง)"],
+    horizontal=True
+)
+
+# ตั้งค่าตัวแปร CSS ตามโหมดที่ผู้ใช้เลือก
+if "สำหรับรูปพื้นหลังสีมืด" in color_mode:
+    # โหมดกล่องขาว ตัวอักษรสีน้ำเงินเข้ม
+    card_bg = "rgba(255, 255, 255, 0.96)"
+    text_color = "#0c2340"
+    label_color = "#0c2340"
+    border_color = "rgba(12, 35, 64, 0.25)"
+    shadow_color = "rgba(0, 0, 0, 0.2)"
+    input_bg = "#ffffff"
+    input_text = "#111111"
+else:
+    # โหมดกล่องดำ ตัวอักษรสีขาวสว่าง
+    card_bg = "rgba(15, 23, 42, 0.95)"
+    text_color = "#ffffff"
+    label_color = "#38bdf8" # สีฟ้าสว่างเพื่อให้เห็นหัวข้อชัดเจน
+    border_color = "rgba(56, 189, 248, 0.4)"
+    shadow_color = "rgba(0, 0, 0, 0.5)"
+    input_bg = "#1e293b"
+    input_text = "#ffffff"
+
+# --- ส่วนควบคุม CSS พื้นหลัง, ตัวอักษร และแผ่นเลเยอร์ฟิล์ม ---
 bg_style = ""
 if bg_image_base64:
     bg_style = f"""
@@ -88,7 +105,6 @@ if bg_image_base64:
             background-position: center;
             background-attachment: fixed;
         }}
-        /* สร้างแผ่นฟิล์มสีน้ำเงินเข้มโปร่งแสงทับหน้าจอทั้งหมดเพื่อช่วยให้กล่องสีขาวดูลอยขึ้นมาชัดเจน */
         .stApp::before {{
             content: "";
             position: absolute;
@@ -96,7 +112,7 @@ if bg_image_base64:
             left: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(12, 35, 64, 0.45); /* สีน้ำเงินเข้มโปร่งแสง 45% */
+            background-color: rgba(12, 35, 64, 0.3); 
             z-index: -1;
         }}
     """
@@ -104,6 +120,49 @@ if bg_image_base64:
 st.markdown(f"""
     <style>
         {bg_style}
+        
+        /* สไตล์บังคับกล่อง Container ทั้ง 3 คอลัมน์ */
+        div[data-testid="stVerticalBlockBorderWrapper"] {{
+            background-color: {card_bg} !important;
+            border-radius: 16px !important;
+            border: 2px solid {border_color} !important;
+            box-shadow: 0 10px 30px {shadow_color} !important;
+            padding: 18px !important;
+        }}
+        
+        /* สไตล์ตัวอักษรหัวข้อภายในกล่อง */
+        h3 {{
+            color: {text_color} !important;
+            border-left: 5px solid {text_color};
+            padding-left: 10px;
+            font-weight: bold !important;
+        }}
+        
+        /* สไตล์ชื่อหัวข้อของช่องกรอกข้อมูลต่างๆ */
+        label[data-testid="stWidgetLabel"] p {{
+            color: {label_color} !important;
+            font-weight: bold !important;
+        }}
+        
+        /* สไตล์ข้อความทั่วไปและการแจ้งเตือน */
+        .block-container p {{
+            color: {text_color} !important;
+        }}
+        
+        /* บังคับช่องกรอกข้อมูล (Input & Selectbox) ให้สีชัดเจนตามโหมด */
+        div[data-baseweb="select"] > div, div[data-baseweb="input"] > div, input, select {{
+            background-color: {input_bg} !important;
+            color: {input_text} !important;
+        }}
+        
+        /* สไตล์กล่องผลลัพธ์ Code Block สำหรับก๊อปปี้ */
+        div[data-testid="stCodeBlock"] {{
+            border: 2px solid #0c2340;
+            background-color: #ffffff !important;
+        }}
+        div[data-testid="stCodeBlock"] span {{
+            color: #111111 !important; /* บังคับตัวอักษรรายงานที่สลับไป Line ให้เป็นสีดำเข้มเสมอ */
+        }}
         
         /* สไตล์ปุ่มกดหลัก */
         .stButton>button {{
@@ -114,64 +173,9 @@ st.markdown(f"""
             color: white !important;
             font-weight: bold;
             border: none;
-            transition: 0.3s;
-        }}
-        .stButton>button:hover {{
-            background-color: #1d3557 !important;
-            color: #f1faee !important;
         }}
         
-        /* สไตล์กรอบกล่องสำหรับข้อมูลรายงาน */
-        div[data-testid="stCodeBlock"] {{
-            border-radius: 12px;
-            border: 2px solid #0c2340;
-            background-color: #ffffff !important;
-        }}
-        div[data-testid="stCodeBlock"] span {{
-            color: #111111 !important; /* บังคับตัวอักษรในกล่องก็อปปี้ให้เป็นสีดำเข้ม */
-        }}
-        
-        /* สไตล์ข้อความทั่วไปในหน้าเว็บให้เป็นสีที่ชัดเจน */
-        .block-container p {{
-            color: #111111 !important;
-            font-weight: 500;
-        }}
-        
-        /* หัวข้อย่อยให้มีระยะห่างและสีสันคมชัดระดับสูง */
-        h3 {{
-            margin-top: 0.2rem !important;
-            margin-bottom: 0.8rem !important;
-            font-size: 1.25rem !important;
-            color: #0c2340 !important;
-            border-left: 5px solid #0c2340;
-            padding-left: 10px;
-            font-weight: bold !important;
-        }}
-        
-        /* บังคับคอลัมน์และกล่อง Container ทั้งหมดให้เป็นพื้นหลังสีขาวเกือบขาวทึบ (97%) เพื่อแยกตัวอักษรออกจากพื้นหลังมืด */
-        div[data-testid="stVerticalBlockBorderWrapper"] {{
-            background-color: rgba(255, 255, 255, 0.97) !important;
-            border-radius: 16px !important;
-            border: 2px solid rgba(12, 35, 64, 0.2) !important;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25) !important;
-            padding: 18px !important;
-        }}
-        
-        /* แก้ไขตัวอักษรหัวข้อของช่องกรอกต่างๆ (เช่น วันที่ เวลา เลือกเจ้าหน้าที่) */
-        label[data-testid="stWidgetLabel"] p {{
-            color: #0c2340 !important;
-            font-weight: bold !important;
-            font-size: 1rem !important;
-        }}
-        
-        /* จัดข้อความส่วนสปอยเลอร์/Expander */
-        .stExpander {{
-            background-color: rgba(255, 255, 255, 0.98) !important;
-            border-radius: 10px;
-            border: 1px solid rgba(12, 35, 64, 0.15) !important;
-        }}
-        
-        /* ปรับแต่งส่วนหัวข้อหลักสุดของแอป (กรณีมีภาพพื้นหลังจะใช้ตัวอักษรสีขาวสว่างเด่นชัด) */
+        /* ปรับแต่งส่วนหัวข้อหลักสุดของแอป */
         .main-title {{
             text-align: center; 
             color: { '#ffffff' if bg_image_base64 else '#0c2340' }; 
@@ -187,21 +191,14 @@ st.markdown(f"""
             margin-bottom: 20px;
         }}
         
-        /* บังคับให้ข้อความสปอยเลอร์ของ Expander อ่านง่าย */
-        .stExpander details summary p {{
-            color: #0c2340 !important;
-            font-weight: bold !important;
-        }}
-        
-        /* ลดช่องว่างส่วนหัวเว็บบนมือถือและ PC */
         .block-container {{
-            padding-top: 1.5rem !important;
+            padding-top: 1rem !important;
             padding-bottom: 2rem !important;
         }}
     </style>
 """, unsafe_allow_html=True)
 
-# ส่วนหัวหลักของแอปพลิเคชัน (ดึงคลาส CSS ที่ปรับแต่งสีอัจฉริยะมาใช้)
+# ส่วนหัวหลักของแอปพลิเคชัน
 st.markdown('<h2 class="main-title">👮‍♂️ ระบบรายงาน Line Group</h2>', unsafe_allow_html=True)
 st.markdown('<p class="main-subtitle">งานสอบสวน สภ.ไม้แก่น (ระบบฐานข้อมูล NoSQL Cloud)</p>', unsafe_allow_html=True)
 
@@ -270,7 +267,6 @@ for p in personnel_list:
 
 tasks_list = [t["task_detail"] for t in tasks_data]
 
-
 # ==================== แบ่งหน้าจอออกเป็น 3 คอลัมน์ใหญ่ (PC) ====================
 main_col1, main_col2, main_col3 = st.columns([1, 1, 1.1])
 
@@ -308,7 +304,6 @@ with main_col1:
         suffix = ""
         if with_team:
             suffix = " พร้อมด้วย" if has_team_names else " พร้อมพวก"
-
 
 # ----------------- คอลัมน์ที่ 2: รายละเอียดภารกิจ -----------------
 with main_col2:
@@ -353,7 +348,6 @@ with main_col2:
         elif len(valid_tasks) > 1:
             final_tasks_text = "\n".join([f"- {task}" for task in valid_tasks])
 
-
 # ----------------- คอลัมน์ที่ 3: ข้อความรายงานสำหรับส่ง -----------------
 with main_col3:
     with st.container(border=True):
@@ -369,99 +363,38 @@ with main_col3:
    จึงเรียนมาเพื่อโปรดทราบ"""
 
         st.code(report_text, language="text")
-        st.success("👆 แตะปุ่มไอคอนสี่เหลี่ยมซ้อนกันที่มุมขวาบนของรายงานด้านบนเพื่อ Copy ได้ทันที!")
+        st.success("👆 แตะปุ่มไอคอนสี่เหลี่ยมซ้อนกันที่มุมขวาบนเพื่อ Copy")
 
-
-# --- แผงควบคุมและแก้ไขจัดการฐานข้อมูล NoSQL ด้านล่างสุด ---
+# --- แผงควบคุมหลังบ้านและจัดการภาพพื้นหลัง ---
 st.markdown("---")
-
-with st.expander("⚙️ ตั้งค่าระบบหลังบ้าน (เพิ่ม / แก้ไข / ลบ รายชื่อและภารกิจบนคลาวด์)"):
-    
-    # จัดการรายชื่อตำรวจ
+with st.expander("⚙️ ตั้งค่าระบบหลังบ้าน (รายชื่อ / ภารกิจ / เปลี่ยนพื้นหลัง)"):
+    # รายชื่อตำรวจ
     st.markdown("#### 👤 1. จัดการรายชื่อเจ้าหน้าที่")
-    
     with st.form("new_officer_form", clear_on_submit=True):
-        st.markdown("**➕ เพิ่มรายชื่อใหม่ (ระบบจะนำไปจัดเรียงลำดับตามยศให้อัตโนมัติ)**")
         c1, c2 = st.columns(2)
-        n_rank = c1.text_input("ยศ (เช่น พ.ต.ท., ร.ต.อ., ด.ต.)")
+        n_rank = c1.text_input("ยศ (เช่น พ.ต.ท., ร.ต.อ.)")
         n_name = c2.text_input("ชื่อ-นามสกุล")
         n_pos = st.text_input("ตำแหน่ง")
-        btn_add_p = st.form_submit_button("💾 บันทึกรายชื่อ")
-        if btn_add_p and n_rank and n_name and n_pos:
+        if st.form_submit_button("💾 บันทึกรายชื่อ") and n_rank and n_name and n_pos:
             db.collection("personnel").add({"rank": n_rank, "name": n_name, "position": n_pos})
-            st.toast("🎉 เพิ่มรายชื่อเจ้าหน้าที่และเรียงลำดับยศสำเร็จ!", icon="👤")
-            time.sleep(1)
             st.rerun()
 
-    st.markdown("**📋 รายชื่อเจ้าหน้าที่ทั้งหมดในระบบ (เรียงตามลำดับอาวุโสยศ)**")
-    for p_idx, person in enumerate(personnel_list):
-        p_col1, p_col2, p_col3 = st.columns([7, 1.5, 1.5])
-        p_col1.write(f"**{person['rank']}{person['name']}**\n{person['position']}")
-        
-        if p_col2.button("✏️", key=f"edit_p_{person['id']}"):
-            st.session_state[f"editing_p_{person['id']}"] = True
-            
-        if p_col3.button("🗑️", key=f"del_p_{person['id']}"):
+    for person in personnel_list:
+        p_col1, p_col2 = st.columns([8, 2])
+        p_col1.write(f"**{person['rank']}{person['name']}** - {person['position']}")
+        if p_col2.button("🗑️ ลบ", key=f"del_p_{person['id']}"):
             db.collection("personnel").document(person['id']).delete()
-            st.toast("🗑️ ลบรายชื่อเจ้าหน้าที่เรียบร้อยแล้ว!", icon="✅")
-            time.sleep(1)
             st.rerun()
-            
-        if st.session_state.get(f"editing_p_{person['id']}", False):
-            with st.container():
-                e_rank = st.text_input("แก้ไขยศ", value=person['rank'], key=f"er_{person['id']}")
-                e_name = st.text_input("แก้ไขชื่อ-สกุล", value=person['name'], key=f"en_{person['id']}")
-                e_pos = st.text_input("แก้ไขตำแหน่ง", value=person['position'], key=f"ep_{person['id']}")
-                if st.button("💾 อัปเดตข้อมูล", key=f"save_p_{person['id']}"):
-                    db.collection("personnel").document(person['id']).update({
-                        "rank": e_rank, "name": e_name, "position": e_pos
-                    })
-                    st.session_state[f"editing_p_{person['id']}"] = False
-                    st.toast("📝 อัปเดตข้อมูลและจัดเรียงลำดับยศเรียบร้อย!", icon="🎉")
-                    time.sleep(1)
-                    st.rerun()
 
-    # จัดการข้อความภารกิจ
+    # จัดการภาพพื้นหลัง
     st.markdown("---")
-    st.markdown("#### 📝 2. จัดการคลังข้อความภารกิจ")
-    
-    for t_idx, t_obj in enumerate(tasks_data):
-        t_col1, t_col2, t_col3 = st.columns([7, 1.5, 1.5])
-        t_col1.write(f"**{t_idx+1}.** {t_obj['task_detail']}")
-        
-        if t_col2.button("✏️", key=f"edit_t_{t_obj['id']}"):
-            st.session_state[f"editing_t_{t_obj['id']}"] = True
-            
-        if t_col3.button("🗑️", key=f"del_t_{t_obj['id']}"):
-            db.collection("tasks").document(t_obj['id']).delete()
-            st.toast("🗑️ ลบข้อความภารกิจออกจากระบบแล้ว!", icon="✅")
-            time.sleep(1)
-            st.rerun()
-            
-        if st.session_state.get(f"editing_t_{t_obj['id']}", False):
-            with st.container():
-                e_task = st.text_area("แก้ไขรายละเอียดภารกิจ", value=t_obj['task_detail'], key=f"et_text_{t_obj['id']}")
-                if st.button("💾 อัปเดตภารกิจ", key=f"save_t_{t_obj['id']}"):
-                    db.collection("tasks").document(t_obj['id']).update({"task_detail": e_task})
-                    st.session_state[f"editing_t_{t_obj['id']}"] = False
-                    st.toast("📝 แก้ไขข้อความภารกิจสำเร็จ!", icon="🎉")
-                    time.sleep(1)
-                    st.rerun()
-
-
-# --- ล่างสุดของหน้าเว็บ: ส่วนจัดการเปลี่ยนภาพพื้นหลังระบบ ---
-st.markdown("<br>", unsafe_allow_html=True)
-with st.expander("🖼️ ตั้งค่า/อัปโหลดภาพพื้นหลังเว็บ (Background Settings)"):
-    uploaded_bg = st.file_uploader("อัปโหลดภาพใหม่เพื่อเปลี่ยนพื้นหลัง", type=["jpg", "jpeg", "png"], key="bg_uploader")
+    st.markdown("#### 🖼️ 2. ตั้งค่าภาพพื้นหลังเว็บ")
+    uploaded_bg = st.file_uploader("อัปโหลดภาพใหม่เพื่อเปลี่ยนพื้นหลัง", type=["jpg", "jpeg", "png"])
     if uploaded_bg:
         new_bg_base64 = process_and_get_base64(uploaded_bg)
         save_background_image(new_bg_base64)
-        st.toast("🎉 อัปเดตภาพพื้นหลังความละเอียดสูงเรียบร้อยแล้ว!", icon="🖼️")
-        time.sleep(1)
         st.rerun()
-    elif bg_image_base64 is not None:
-        if st.button("❌ ลบภาพพื้นหลัง (กลับไปใช้พื้นหลังสีเทาขาวปกติ)"):
+    if bg_image_base64 is not None:
+        if st.button("❌ ลบภาพพื้นหลัง กลับไปใช้สีเทาปกติ"):
             delete_background_image()
-            st.toast("🧹 รีเซ็ตพื้นหลังระบบบนคลาวด์เรียบร้อยแล้ว!", icon="✅")
-            time.sleep(1)
             st.rerun()
