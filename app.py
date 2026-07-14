@@ -3,15 +3,64 @@ from datetime import datetime
 import google.auth
 from google.cloud import firestore
 from google.oauth2 import service_account
+import time
 
-st.set_page_config(page_title="ระบบสร้างข้อความรายงาน สภ.ไม้แก่น", page_icon="👮‍♂️", layout="centered")
-st.title("👮‍♂️ ระบบข้อความรายงาน Line Group")
-st.subheader("งานสอบสวน สภ.ไม้แก่น")
+# ตั้งค่าหน้าเว็บให้รองรับมือถือและซ่อนเมนูที่ไม่จำเป็นเพื่อความสะอาดตา
+st.set_page_config(
+    page_title="รายงานสอบสวน สภ.ไม้แก่น", 
+    page_icon="👮‍♂️", 
+    layout="centered",
+    initial_sidebar_state="collapsed"
+)
+
+# ปรับแต่ง CSS เพื่อให้หน้าตาบนมือถือดูพรีเมียม ปุ่มกดง่ายขึ้น และฟอนต์อ่านง่าย
+st.markdown("""
+    <style>
+        /* สไตล์ปุ่มกดหลัก */
+        .stButton>button {
+            width: 100%;
+            border-radius: 10px;
+            height: 3em;
+            background-color: #0c2340;
+            color: white;
+            font-weight: bold;
+            border: none;
+            transition: 0.3s;
+        }
+        .stButton>button:hover {
+            background-color: #1d3557;
+            color: #f1faee;
+        }
+        /* สไตล์กรอบกล่องสำหรับข้อมูลรายงาน */
+        div[data-testid="stCodeBlock"] {
+            border-radius: 12px;
+            border: 2px solid #0c2340;
+            background-color: #f8f9fa;
+        }
+        /* หัวข้อย่อยให้มีระยะห่างที่พอดี */
+        h3 {
+            margin-top: 1.5rem !important;
+            margin-bottom: 0.8rem !important;
+            font-size: 1.25rem !important;
+            color: #0c2340;
+            border-left: 5px solid #0c2340;
+            padding-left: 10px;
+        }
+        /* ลดช่องว่างส่วนหัวเว็บบนมือถือ */
+        .block-container {
+            padding-top: 1.5rem !important;
+            padding-bottom: 2rem !important;
+        }
+    </style>
+""", unsafe_allowed_html=True)
+
+# ส่วนหัวหลักของแอปพลิเคชัน
+st.markdown("<h2 style='text-align: center; color: #0c2340; margin-bottom: 0;'>👮‍♂️ ระบบรายงาน Line Group</h2>", unsafe_allowed_html=True)
+st.markdown("<p style='text-align: center; color: #666; font-size: 0.95rem; margin-bottom: 20px;'>งานสอบสวน สภ.ไม้แก่น (ระบบฐานข้อมูล NoSQL Cloud)</p>", unsafe_allowed_html=True)
 
 # --- 1. เชื่อมต่อฐานข้อมูล NoSQL (Firebase Firestore) ---
 @st.cache_resource
 def get_firestore_client():
-    # ดึงค่าสิทธิ์การเข้าถึงจาก Streamlit Secrets ที่เพิ่งบันทึกไป
     credentials_info = st.secrets["firebase"]
     creds = service_account.Credentials.from_service_account_info(credentials_info)
     db = firestore.Client(credentials=creds, project=credentials_info["project_id"])
@@ -21,7 +70,6 @@ db = get_firestore_client()
 
 # --- 2. ฟังก์ชัน โหลด/บันทึก ข้อมูลจากคลาวด์ ---
 def load_personnel():
-    # ดึงข้อมูลจากคอลเลกชัน 'personnel'
     docs = db.collection("personnel").stream()
     personnel = []
     for doc in docs:
@@ -29,7 +77,6 @@ def load_personnel():
         p_data["id"] = doc.id
         personnel.append(p_data)
         
-    # ถ้าฐานข้อมูลว่างเปล่า (การรันครั้งแรก) ให้ใส่ข้อมูลเริ่มต้นเป็นตัวอย่างให้อัตโนมัติ
     if not personnel:
         default_p = [
             {"rank": "พ.ต.ท.", "name": "ปฐมพงศ์ ศีรษะพล", "position": "สว.(สอบสวน) สภ.ไม้แก่น"},
@@ -46,7 +93,6 @@ def load_personnel():
     return personnel
 
 def load_tasks():
-    # ดึงข้อมูลจากคอลเลกชัน 'tasks'
     docs = db.collection("tasks").stream()
     tasks = []
     for doc in docs:
@@ -54,24 +100,12 @@ def load_tasks():
         t_data["id"] = doc.id
         tasks.append(t_data)
         
-    # ถ้าคลังภารกิจว่างเปล่า ให้ใส่ค่าเริ่มต้น
     if not tasks:
         default_tasks = [
             "ได้นำตัวผู้ต้องหาคดียาเสพติด ส่งตัวฝากขังต่อศาลจังหวัดปัตตานี",
             "ได้รับมอบหมายจากพนักงานสอบสวน ยื่นคำร้องฝากขังต่อ ครั้งที่ 2,3 และ 4 ต่อศาลจังหวัดปัตตานี",
             "ได้ส่งสำนวนการสอบสวนคดีอยาเสพติด จำนวน 1 เรื่อง ที่พนักงานสอบสวนทำการสอบสวนเสร็จสิ้นแล้ว ไปยังพนักงานอัยการจังหวัดปัตตานี",
-            "ได้นำยาเสพติดของกลางในคดีอาญา ส่งตรวจพิสูจน์ กลุ่มงานตรวจพิสูจน์ยาเสพติด พิสูจน์หลักฐานจังหวัดปัตตานี",
-            "ดำเนินการติดตามผลการตรวจพิสูจน์ประวัติการต้องหาคดีอาญาของผู้ขออนุญาต กลุ่มงานทะเบียนประวัติอาชญากร",
-            "ได้นำอาวุธปืนของกลางในคดีอาญา ส่งตรวจพิสูจน์ กลุ่มงานตรวจพิสูจน์อาวุธปืน และเครื่องกระสุนปืน ศุ์นย์พิสูจน์หลักฐาน 10",
-            "ดำเนินการติดตามผลการตรวจพิสูจน์อาวุธปืน และเครื่องกระสุนปืน กลุ่มงานตรวจพิสูจน์อาวุธปืน และเครื่องกระสุนปืน ศุ์นย์พิสูจน์หลักฐาน 10 ศูนย์นิติวิทยาศาสตร์จังหวัดชายแดนภาคใต้ เพื่อนำมาประกอบสำนวนการสอบสวน",
-            "ได้นำของกลางในคดีอาญา ส่งตรวจพิสูจน์เพื่อหาสารพันธุกรรม DNA กลุ่มงานตรวจชีววิทยาและดีเอ็นเอ ศุ์นย์พิสูจน์หลักฐาน 10 ศูนย์นิติวิทยาศาสตร์จังหวัดชายแดนภาคใต้",
-            "ดำเนินการติดตามผลการตรวจพิสูจน์ของกลางในคดีอาญา กลุ่มงานตรวจชีววิทยาและดีเอ็นเอ (DNA) ศุ์นย์พิสูจน์หลักฐาน 10 ศูนย์นิติวิทยาศาสตร์จังหวัดชายแดนภาคใต้ เพื่อนำมาประกอบสำนวนการสอบสวน",
-            "ได้นำของกลางในคดีอาญา ส่งตรวจพิสูจน์เพื่อตรวจหารอยลายนิ้วมือแฝง กลุ่มงานตรวจลายนิ้วมือแฝง ศุ์นย์พิสูจน์หลักฐาน 10 ศูนย์นิติวิทยาศาสตร์จังหวัดชายแดนภาคใต้",
-            "ดำเนินการติดตามผลการตรวจพิสูจน์รอยลายนิ้วมือแฝง กลุ่มงานตรวจลายนิ้วมือแฝง ศุ์นย์พิสูจน์หลักฐาน 10 ศูนย์นิติวิทยาศาสตร์จังหวัดชายแดนภาคใต้ เพื่อนำมาประกอบสำนวนการสอบสวน",
-            "ได้นำโทรศัพท์มือถือของกลางในคดีอาญา ส่งตรวจพิสูจน์เพื่อตรวจหาความเชื่อมโยงในภาพรวม กลุ่มงานตรวจพิสูจน์อาชญากรรมคอมพิวเตอร์ ศุ์นย์พิสูจน์หลักฐาน 10 ศูนย์นิติวิทยาศาสตร์จังหวัดชายแดนภาคใต้",
-            "ดำเนินการติดตามผลการตรวจพิสูจน์โทรศัพท์มือถือของกลางในคดีอาญา กลุ่มงานตรวจพิสูจน์อาชญากรรมคอมพิวเตอร์ ศุ์นย์พิสูจน์หลักฐาน 10 ศูนย์นิติวิทยาศาสตร์จังหวัดชายแดนภาคใต้ เพื่อนำมาประกอบสำนวนการสอบสวน",
-            "ได้นำของกลางในคดีอาญา ส่งตรวจพิสูจน์ กลุ่มงานตรวจทางเคมี ฟิสิกส์ ศุ์นย์พิสูจน์หลักฐาน 10 ศูนย์นิติวิทยาศาสตร์จังหวัดชายแดนภาคใต้",
-            "ดำเนินการติดตามผลการตรวจพิสูจน์ของกลางในคดีอาญา กลุ่มงานตรวจทางเคมี ฟิสิกส์ ศุ์นย์พิสูจน์หลักฐาน 10 ศูนย์นิติวิทยาศาสตร์จังหวัดชายแดนภาคใต้ เพื่อนำมาประกอบสำนวนการสอบสวน"
+            "ได้นำยาเสพติดของกลางในคดีอาญา ส่งตรวจพิสูจน์ กลุ่มงานตรวจพิสูจน์ยาเสพติด พิสูจน์หลักฐานจังหวัดปัตตานี"
         ]
         for t in default_tasks:
             db.collection("tasks").add({"task_detail": t})
@@ -88,29 +122,31 @@ tasks_list = [t["task_detail"] for t in tasks_data]
 st.markdown("### ⏱️ วันที่และเวลาภารกิจ")
 col1, col2 = st.columns(2)
 with col1:
-    date_input = st.date_input("เลือกวันที่", datetime.now())
+    date_input = st.date_input("📅 เลือกวันที่", datetime.now())
     months_th = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]
     year_th = str(date_input.year + 543)[2:]
     date_str = f"{date_input.day} {months_th[date_input.month-1]}{year_th}"
 
 with col2:
     current_time_str = datetime.now().strftime("%H.%M")
-    time_str = st.text_input("กรอกเวลา (น.)", value=current_time_str)
+    time_str = st.text_input("⏰ กรอกเวลา (น.)", value=current_time_str)
 
 # --- 4. ผู้ปฏิบัติหน้าที่ ---
-st.markdown("### 👤 ผู้ปฏิบัติหน้าที่")
-main_officer_select = st.selectbox("เลือกผู้ปฏิบัติหลัก (คนแรก)", list(officer_options.keys()))
+st.markdown("### 👤 เจ้าหน้าที่ผู้ปฏิบัติงาน")
+main_officer_select = st.selectbox("👮‍♂️ เลือกผู้ปฏิบัติหลัก (คนแรก)", list(officer_options.keys()))
 main_officer = officer_options[main_officer_select]
 
-with_team = st.checkbox("พร้อมพวก")
+with_team = st.checkbox("➕ มีผู้ปฏิบัติร่วม (พร้อมพวก/พร้อมด้วย)", value=False)
 team_member_lines = ""
 has_team_names = False
 
 if with_team:
-    num_team = st.number_input("จำนวนผู้ปฏิบัติร่วม (กี่คน)", min_value=1, max_value=10, value=1, step=1)
+    st.info("💡 ระบุจำนวนและเลือกรายชื่อผู้ร่วมทีมด้านล่าง:")
+    num_team = st.number_input("จำนวนผู้ปฏิบัติร่วม (คน)", min_value=1, max_value=10, value=1, step=1)
+    
     for i in range(int(num_team)):
-        team_select = st.selectbox(f"เลือกผู้ปฏิบัติร่วม คนที่ {i+1}", ["-- ไม่ระบุชื่อ (เว้นว่างไว้) --"] + list(officer_options.keys()), key=f"team_{i}")
-        if team_select != "-- ไม่ระบุชื่อ (เว้นว่างไว้) --":
+        team_select = st.selectbox(f"👤 เลือกผู้ร่วมปฏิบัติงานคนที่ {i+1}", ["-- ไม่ระบุชื่อ (ใช้คำว่าพร้อมพวกเฉยๆ) --"] + list(officer_options.keys()), key=f"team_{i}")
+        if team_select != "-- ไม่ระบุชื่อ (ใช้คำว่าพร้อมพวกเฉยๆ) --":
             member = officer_options[team_select]
             team_member_lines += f"\n{member['rank']}{member['name']}\n{member['position']}"
             has_team_names = True
@@ -121,15 +157,14 @@ if with_team:
 
 # --- 5. รายละเอียดภารกิจ ---
 st.markdown("### 📝 รายละเอียดภารกิจ")
-num_tasks = st.number_input("จำนวนภารกิจที่ต้องการรายงาน (กี่เรื่อง)", min_value=1, max_value=5, value=1, step=1)
+num_tasks = st.number_input("📌 จำนวนภารกิจที่ต้องการรายงาน (เรื่อง)", min_value=1, max_value=5, value=1, step=1)
 
 all_task_details = []
 
 for idx in range(int(num_tasks)):
     st.markdown(f"**📍 ภารกิจเรื่องที่ {idx+1}**")
-    
     selected_task = st.selectbox(
-        f"พิมพ์คำค้นหาหรือเลือกข้อความภารกิจที่ {idx+1}", 
+        f"เลือกหรือค้นหาข้อความภารกิจที่ {idx+1}", 
         [""] + tasks_list, 
         key=f"select_{idx}"
     )
@@ -139,21 +174,22 @@ for idx in range(int(num_tasks)):
             processed_task = processed_task.replace("ได้นำ", "นำ", 1)
         all_task_details.append(processed_task)
 
-# พิมพ์ภารกิจใหม่บันทึกลง Firebase NoSQL ถาวร
-with st.expander("➕ พิมพ์ภารกิจใหม่นอกเหนือจากในคลังเพื่อบันทึกถาวร"):
-    new_detail = st.text_area("พิมพ์รายละเอียดภารกิจฉบับเต็มใหม่ที่นี่")
-    if st.button("💾 บันทึกเข้าฐานข้อมูล NoSQL"):
+# เพิ่มคลังภารกิจพร้อม Popup เตือน
+with st.expander("➕ เพิ่มภารกิจใหม่นอกเหนือจากในคลัง เพื่อใช้ในครั้งถัดไป"):
+    new_detail = st.text_area("พิมพ์รายละเอียดภารกิจใหม่ที่นี่")
+    if st.button("💾 บันทึกภารกิจถาวร"):
         if new_detail:
             if new_detail not in tasks_list:
                 db.collection("tasks").add({"task_detail": new_detail})
-                st.success("บันทึกภารกิจใหม่เข้าสู่คลาวด์ NoSQL เรียบร้อยแล้ว!")
+                st.toast("🎉 เพิ่มภารกิจใหม่ลงฐานข้อมูลสำเร็จ!", icon="💾")
+                time.sleep(1)
                 st.rerun()
             else:
-                st.error("❌ มีข้อความภารกิจนี้อยู่ในระบบแล้ว")
+                st.error("❌ มีภารกิจนี้ในคลังแล้ว")
         else:
-            st.warning("⚠️ กรุณากรอกรายละเอียดภารกิจก่อนกดบันทึก")
+            st.warning("⚠️ กรุณากรอกข้อความก่อนบันทึก")
 
-# จัดรูปแบบข้อความตามเงื่อนไข (เรื่องเดียวไม่มีขีด / หลายเรื่องขึ้นบรรทัดใหม่พร้อมใส่ - )
+# จัดรูปแบบตามเงื่อนไข (เรื่องเดียวไม่มีขีด / หลายเรื่องใส่ - และขึ้นบรรทัดใหม่)
 final_tasks_text = ""
 valid_tasks = [task for task in all_task_details if task]
 
@@ -163,8 +199,7 @@ elif len(valid_tasks) > 1:
     final_tasks_text = "\n".join([f"- {task}" for task in valid_tasks])
 
 # --- 6. ประมวลผลและสร้างข้อความรายงาน (Output) ---
-st.markdown("---")
-st.markdown("### 📋 ข้อความรายงานที่พร้อมส่ง (Output)")
+st.markdown("### 📋 ข้อความรายงานสำหรับส่ง Line Group")
 
 report_text = f"""สภ.ไม้แก่น 
 งานสอบสวน
@@ -176,80 +211,79 @@ report_text = f"""สภ.ไม้แก่น
    จึงเรียนมาเพื่อโปรดทราบ"""
 
 st.code(report_text, language="text")
-st.info("💡 ข้อมูลจะถูกดึงและจัดเก็บผ่าน Firebase Firestore อัตโนมัติ!")
+st.success("👆 แตะปุ่มไอคอนสี่เหลี่ยมซ้อนกันที่มุมขวาบนของข้อความด้านบนเพื่อ Copy ไปส่งใน Line ได้ทันที!")
 
-
-# --- 7. แผงควบคุมและแก้ไขจัดการฐานข้อมูล NoSQL ---
+# --- 7. แผงควบคุมจัดการฐานข้อมูล NoSQL แบบซ่อนไว้ประหยัดเนื้อที่ ---
 st.markdown("---")
-with st.expander("⚙️ เมนูจัดการข้อมูลอย่างละเอียด (เพิ่ม / แก้ไข / ลบ บนคลาวด์ NoSQL)"):
+with st.expander("⚙️ ตั้งค่าระบบ (เพิ่ม / แก้ไข / ลบ รายชื่อและภารกิจ)"):
     
-    # ==================== ส่วนที่ 1: จัดการรายชื่อตำรวจ ====================
-    st.markdown("### 👤 1. จัดการรายชื่อเจ้าหน้าที่")
+    # จัดการรายชื่อตำรวจ
+    st.markdown("#### 👤 1. จัดการรายชื่อเจ้าหน้าที่")
     
     with st.form("new_officer_form", clear_on_submit=True):
-        st.markdown("**➕ เพิ่มรายชื่อใหม่ลงระบบถาวร**")
-        c1, c2, c3 = st.columns([1, 2, 3])
+        st.markdown("**➕ เพิ่มรายชื่อใหม่**")
+        c1, c2 = st.columns(2)
         n_rank = c1.text_input("ยศ")
         n_name = c2.text_input("ชื่อ-นามสกุล")
-        n_pos = c3.text_input("ตำแหน่ง")
-        btn_add_p = st.form_submit_button("💾 บันทึกรายชื่อใหม่")
+        n_pos = st.text_input("ตำแหน่ง")
+        btn_add_p = st.form_submit_button("💾 บันทึกรายชื่อ")
         if btn_add_p and n_rank and n_name and n_pos:
             db.collection("personnel").add({"rank": n_rank, "name": n_name, "position": n_pos})
-            st.success("บันทึกรายชื่อสำเร็จ!")
+            st.toast("🎉 เพิ่มรายชื่อเจ้าหน้าที่สำเร็จ!", icon="👤")
+            time.sleep(1)
             st.rerun()
 
-    st.markdown("**📋 รายชื่อทั้งหมดในระบบปัจจุบัน**")
+    st.markdown("**📋 รายชื่อเจ้าหน้าที่ทั้งหมด**")
     for p_idx, person in enumerate(personnel_list):
-        p_col1, p_col2, p_col3, p_col4, p_col5 = st.columns([1, 2, 4, 1, 1])
-        p_col1.write(person['rank'])
-        p_col2.write(person['name'])
-        p_col3.write(person['position'])
+        p_col1, p_col2, p_col3 = st.columns([7, 1.5, 1.5])
+        p_col1.write(f"**{person['rank']}{person['name']}**\n{person['position']}")
         
-        if p_col4.button("✏️", key=f"edit_p_{person['id']}"):
+        if p_col2.button("✏️", key=f"edit_p_{person['id']}"):
             st.session_state[f"editing_p_{person['id']}"] = True
             
-        if p_col5.button("🗑️", key=f"del_p_{person['id']}"):
+        if p_col3.button("🗑️", key=f"del_p_{person['id']}"):
             db.collection("personnel").document(person['id']).delete()
-            st.success("ลบรายชื่อเรียบร้อย!")
+            st.toast("🗑️ ลบรายชื่อเจ้าหน้าที่เรียบร้อยแล้ว!", icon="✅")
+            time.sleep(1)
             st.rerun()
             
         if st.session_state.get(f"editing_p_{person['id']}", False):
             with st.container():
-                st.markdown(f"**🛠️ กำลังแก้ไขข้อมูลของ: {person['rank']}{person['name']}**")
                 e_rank = st.text_input("แก้ไขยศ", value=person['rank'], key=f"er_{person['id']}")
                 e_name = st.text_input("แก้ไขชื่อ-สกุล", value=person['name'], key=f"en_{person['id']}")
                 e_pos = st.text_input("แก้ไขตำแหน่ง", value=person['position'], key=f"ep_{person['id']}")
-                if st.button("💾 บันทึกการแก้ไข", key=f"save_p_{person['id']}"):
+                if st.button("💾 อัปเดตข้อมูล", key=f"save_p_{person['id']}"):
                     db.collection("personnel").document(person['id']).update({
                         "rank": e_rank, "name": e_name, "position": e_pos
                     })
                     st.session_state[f"editing_p_{person['id']}"] = False
-                    st.success("อัปเดตข้อมูลสำเร็จ!")
+                    st.toast("📝 อัปเดตข้อมูลเจ้าหน้าที่เรียบร้อย!", icon="🎉")
+                    time.sleep(1)
                     st.rerun()
 
-    # ==================== ส่วนที่ 2: จัดการข้อความภารกิจ ====================
+    # จัดการข้อความภารกิจ
     st.markdown("---")
-    st.markdown("### 📝 2. จัดการคลังข้อความภารกิจ")
+    st.markdown("#### 📝 2. จัดการคลังข้อความภารกิจ")
     
-    st.markdown("**📋 รายการภารกิจทั้งหมดในระบบ**")
     for t_idx, t_obj in enumerate(tasks_data):
-        t_col1, t_col2, t_col3 = st.columns([7, 1, 1])
-        t_col1.write(f"{t_idx+1}. {t_obj['task_detail']}")
+        t_col1, t_col2, t_col3 = st.columns([7, 1.5, 1.5])
+        t_col1.write(f"**{t_idx+1}.** {t_obj['task_detail']}")
         
         if t_col2.button("✏️", key=f"edit_t_{t_obj['id']}"):
             st.session_state[f"editing_t_{t_obj['id']}"] = True
             
         if t_col3.button("🗑️", key=f"del_t_{t_obj['id']}"):
             db.collection("tasks").document(t_obj['id']).delete()
-            st.success("ลบภารกิจเรียบร้อย!")
+            st.toast("🗑️ ลบข้อความภารกิจออกจากระบบแล้ว!", icon="✅")
+            time.sleep(1)
             st.rerun()
             
         if st.session_state.get(f"editing_t_{t_obj['id']}", False):
             with st.container():
-                st.markdown(f"**🛠️ กำลังแก้ไขข้อความภารกิจที่ {t_idx+1}**")
-                e_task = st.text_area("แก้ไขข้อความภารกิจ", value=t_obj['task_detail'], key=f"et_text_{t_obj['id']}")
-                if st.button("💾 บันทึกการแก้ไขข้อความ", key=f"save_t_{t_obj['id']}"):
+                e_task = st.text_area("แก้ไขรายละเอียดภารกิจ", value=t_obj['task_detail'], key=f"et_text_{t_obj['id']}")
+                if st.button("💾 อัปเดตภารกิจ", key=f"save_t_{t_obj['id']}"):
                     db.collection("tasks").document(t_obj['id']).update({"task_detail": e_task})
                     st.session_state[f"editing_t_{t_obj['id']}"] = False
-                    st.success("อัปเดตข้อความสำเร็จ!")
+                    st.toast("📝 แก้ไขข้อความภารกิจสำเร็จ!", icon="🎉")
+                    time.sleep(1)
                     st.rerun()
