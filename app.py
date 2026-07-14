@@ -16,24 +16,36 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- ฟังก์ชันย่อขนาดภาพและแปลงเป็น Base64 เพื่อป้องกันปัญหาไฟล์เกิน 1MB ใน Firestore ---
+# --- ฟังก์ชันย่อขนาดภาพระดับ HD และแปลงเป็น Base64 แบบคำนวณขนาดไฟล์อัตโนมัติ ---
 def process_and_get_base64(image_file):
-    # เปิดรูปภาพด้วย Pillow
     img = Image.open(image_file)
     
-    # 1. ปรับขนาดรูปภาพ (Resize) ให้มีความกว้างสูงสุดไม่เกิน 1280px (รักษาอัตราส่วนภาพเดิม)
-    max_size = 1280
+    # 1. เพิ่มความละเอียดขึ้นเป็นระดับ Full HD (1920px) เพื่อความคมชัดสูงบนหน้าจอคอมพิวเตอร์
+    max_size = 1920
     img.thumbnail((max_size, max_size))
     
     # แปลงภาพจากโหมด RGBA (ถ้ามี) เป็น RGB เพื่อเซฟเป็น JPEG
     if img.mode in ("RGBA", "P"):
         img = img.convert("RGB")
         
-    # 2. บีบอัดคุณภาพภาพ (Compress) ให้เหลือ 65% เพื่อให้ขนาดไฟล์เล็กลงมาก แต่ยังดูคมชัดสวยงามบนจอ
-    buffered = io.BytesIO()
-    img.save(buffered, format="JPEG", quality=65, optimize=True)
+    # 2. ปรับคุณภาพเริ่มต้นขึ้นเป็น 85% (ระดับคุณภาพมาตรฐานสูง ภาพไม่แตก)
+    quality = 85
+    step = 5
     
-    # แปลงเป็น Base64
+    # ลูปเพื่อหาจุดที่ภาพชัดที่สุดแต่ขนาดไฟล์ปลอดภัยสำหรับ Firestore (< 950 KB)
+    while quality > 30:
+        buffered = io.BytesIO()
+        img.save(buffered, format="JPEG", quality=quality, optimize=True)
+        file_size = len(buffered.getvalue())
+        
+        if file_size < 950000:
+            encoded = base64.b64encode(buffered.getvalue()).decode()
+            return f"data:image/jpeg;base64,{encoded}"
+            
+        quality -= step
+
+    buffered = io.BytesIO()
+    img.save(buffered, format="JPEG", quality=30, optimize=True)
     encoded = base64.b64encode(buffered.getvalue()).decode()
     return f"data:image/jpeg;base64,{encoded}"
 
@@ -66,12 +78,13 @@ def delete_background_image():
 # โหลดภาพพื้นหลังจากฐานข้อมูลขึ้นมาแสดงผล
 bg_image_base64 = load_background_image()
 
-# --- ส่วนควบคุม CSS พื้นหลังและกล่องโปร่งแสงในแต่ละคอลัมน์ ---
+# --- ส่วนควบคุม CSS พื้นหลัง, ตัวอักษร และแผ่นเลเยอร์ฟิล์มลดความจ้าของรูปภาพ ---
 bg_style = ""
 if bg_image_base64:
     bg_style = f"""
         .stApp {{
-            background-image: url("{bg_image_base64}");
+            /* ซ้อนแผ่นฟิล์มสีน้ำเงินเข้มโปร่งแสง (40%) เพื่อดึงข้อความให้เด่นชัดขึ้นโดยอัตโนมัติ */
+            background: linear-gradient(rgba(12, 35, 64, 0.4), rgba(12, 35, 64, 0.4)), url("{bg_image_base64}");
             background-size: cover;
             background-position: center;
             background-attachment: fixed;
@@ -105,23 +118,57 @@ st.markdown(f"""
             background-color: #f8f9fa;
         }}
         
-        /* หัวข้อย่อยให้มีระยะห่างที่พอดี */
+        /* สไตล์ข้อความหัวข้อเรื่องภายในหน้าเว็บให้เป็นสีที่ชัดเจน */
+        .block-container p {{
+            color: #111111 !important;
+            font-weight: 500;
+        }}
+        
+        /* หัวข้อย่อยให้มีระยะห่างและสีสันคมชัดระดับสูง */
         h3 {{
             margin-top: 0.2rem !important;
             margin-bottom: 0.8rem !important;
             font-size: 1.25rem !important;
-            color: #0c2340;
+            color: #0c2340 !important;
             border-left: 5px solid #0c2340;
             padding-left: 10px;
         }}
         
-        /* สไตล์บังคับให้กล่อง Container ของ Streamlit กลายเป็นกรอบโปร่งแสงสีขาว */
+        /* เพิ่มความทึบแสงของกล่องขาว (เป็น 94%) และทำขอบให้ชัดเจนขึ้นเพื่อสู้กับแสงพื้นหลัง */
         div[data-testid="stVerticalBlockBorderWrapper"] {{
-            background-color: rgba(255, 255, 255, 0.88) !important;
+            background-color: rgba(255, 255, 255, 0.94) !important;
             border-radius: 15px !important;
-            border: 1px solid rgba(255, 255, 255, 0.5) !important;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05) !important;
-            padding: 10px !important;
+            border: 1px solid rgba(12, 35, 64, 0.15) !important;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12) !important;
+            padding: 12px !important;
+        }}
+        
+        /* สไตล์ตัวอักษรของ Label ช่องกรอกต่างๆ ให้เข้มคมชัด */
+        label p {{
+            color: #0c2340 !important;
+            font-weight: 600 !important;
+        }}
+        
+        /* จัดข้อความส่วนสปอยเลอร์/Expander */
+        .stExpander {{
+            background-color: rgba(255, 255, 255, 0.9) !important;
+            border-radius: 10px;
+        }}
+        
+        /* ปรับแต่งส่วนหัวข้อหลักสุดของแอป (กรณีมีภาพพื้นหลังจะใช้ตัวอักษรสีขาวสว่างเด่นชัด) */
+        .main-title {{
+            text-align: center; 
+            color: { '#ffffff' if bg_image_base64 else '#0c2340' }; 
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.6);
+            margin-bottom: 0;
+            font-weight: bold;
+        }}
+        .main-subtitle {{
+            text-align: center; 
+            color: { '#e0e0e0' if bg_image_base64 else '#666666' }; 
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.5);
+            font-size: 0.95rem; 
+            margin-bottom: 20px;
         }}
         
         /* ลดช่องว่างส่วนหัวเว็บบนมือถือและ PC */
@@ -132,9 +179,9 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# ส่วนหัวหลักของแอปพลิเคชัน
-st.markdown("<h2 style='text-align: center; color: #0c2340; margin-bottom: 0;'>👮‍♂️ ระบบรายงาน Line Group</h2>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: #666; font-size: 0.95rem; margin-bottom: 20px;'>งานสอบสวน สภ.ไม้แก่น (ระบบฐานข้อมูล NoSQL Cloud)</p>", unsafe_allow_html=True)
+# ส่วนหัวหลักของแอปพลิเคชัน (ดึงคลาส CSS ที่ปรับแต่งสีอัจฉริยะมาใช้)
+st.markdown('<h2 class="main-title">👮‍♂️ ระบบรายงาน Line Group</h2>', unsafe_allow_html=True)
+st.markdown('<p class="main-subtitle">งานสอบสวน สภ.ไม้แก่น (ระบบฐานข้อมูล NoSQL Cloud)</p>', unsafe_allow_html=True)
 
 # --- 3. ฟังก์ชัน โหลด/บันทึก และ จัดลำดับยศตำรวจ ---
 def get_rank_priority(rank_str):
@@ -385,10 +432,9 @@ st.markdown("<br>", unsafe_allow_html=True)
 with st.expander("🖼️ ตั้งค่า/อัปโหลดภาพพื้นหลังเว็บ (Background Settings)"):
     uploaded_bg = st.file_uploader("อัปโหลดภาพใหม่เพื่อเปลี่ยนพื้นหลัง", type=["jpg", "jpeg", "png"], key="bg_uploader")
     if uploaded_bg:
-        # ใช้ฟังก์ชันใหม่ในการย่อภาพและบีบอัดไฟล์ให้อยู่ในเซฟโซน (< 200KB) ป้องกัน Error
         new_bg_base64 = process_and_get_base64(uploaded_bg)
         save_background_image(new_bg_base64)
-        st.toast("🎉 บันทึกภาพพื้นหลังเข้าสู่ Cloud สำเร็จ!", icon="🖼️")
+        st.toast("🎉 อัปเดตภาพพื้นหลังความละเอียดสูงเรียบร้อยแล้ว!", icon="🖼️")
         time.sleep(1)
         st.rerun()
     elif bg_image_base64 is not None:
