@@ -5,31 +5,48 @@ from google.cloud import firestore
 from google.oauth2 import service_account
 import time
 
-# ตั้งค่าหน้าจอให้เป็นแบบ "กว้างพิเศษ (Wide)" เพื่อให้แสดงผล 3 คอลัมน์บน PC ได้สวยงามพอดี
+# --- 1. ตั้งค่าหน้าจอ (ต้องใส่ Title และรูปไอคอนตรงนี้ก่อน) ---
 st.set_page_config(
     page_title="รายงานสอบสวน สภ.ไม้แก่น", 
     page_icon="👮‍♂️", 
     layout="wide",  
     initial_sidebar_state="collapsed"
 )
-# --- วางแทรกใต้ st.set_page_config(...) ---
+
+# --- 2. โค้ดส่ง Meta Tags ซ่อนตัวเพื่อบังคับ LINE ดึงรูปและคำอธิบายที่เรากำหนดเอง ---
 st.markdown(
     """
     <div style="display:none;">
-        <head>
-            <meta property="og:title" content="ระบบรายงานสรุปผลการปฏิบัติงาน สภ.ไม้แก่น" />
-            
-            <meta property="og:description" content="โปรแกรมช่วยงานสอบสวน สภ.ไม้แก่น สำหรับคัดลอกข้อความรายงานลงกลุ่ม Line" />
-            
-            <meta property="og:image" content="https://github.com/nung304/police-report-app/blob/main/75858736-e9f9-4ae3-ad7b-2cc685c5f76e.png?raw=true" />
-            
-            <meta property="og:url" content="https://police-report.streamlit.app/" />
-            <meta property="og:type" content="website" />
-        </head>
+        <p>ระบบรายงานสรุปผลการปฏิบัติงาน สภ.ไม้แก่น</p>
+        <span data-og-title="ระบบรายงานสรุปผลการปฏิบัติงาน สภ.ไม้แก่น"></span>
+        <span data-og-description="โปรแกรมช่วยงานสอบสวน สภ.ไม้แก่น สำหรับคัดลอกข้อความรายงานลงกลุ่ม Line"></span>
+        <span data-og-image="https://github.com/nung304/police-report-app/blob/main/75858736-e9f9-4ae3-ad7b-2cc685c5f76e.png?raw=true"></span>
     </div>
+    <script>
+        // บังคับเปลี่ยนค่า Meta Tags ในระบบของ Streamlit ทันทีที่หน้าเว็บโหลด
+        document.title = "ระบบรายงานสรุปผลการปฏิบัติงาน สภ.ไม้แก่น";
+        
+        const metaTitle = document.querySelector('meta[property="og:title"]') || document.createElement('meta');
+        metaTitle.setAttribute('property', 'og:title');
+        metaTitle.content = "ระบบรายงานสรุปผลการปฏิบัติงาน สภ.ไม้แก่น";
+        document.head.appendChild(metaTitle);
+
+        const metaDesc = document.querySelector('meta[property="og:description"]') || document.createElement('meta');
+        metaDesc.setAttribute('property', 'og:description');
+        metaDesc.content = "โปรแกรมช่วยงานสอบสวน สภ.ไม้แก่น สำหรับคัดลอกข้อความรายงานลงกลุ่ม Line";
+        document.head.appendChild(metaDesc);
+
+        const metaImg = document.querySelector('meta[property="og:image"]') || document.createElement('meta');
+        metaImg.setAttribute('property', 'og:image');
+        metaImg.content = "https://github.com/nung304/police-report-app/blob/main/75858736-e9f9-4ae3-ad7b-2cc685c5f76e.png?raw=true";
+        document.head.appendChild(metaImg);
+    </script>
     """,
     unsafe_allow_html=True
 )
+
+# --- 3. เชื่อมต่อฐานข้อมูล NoSQL (Firebase Firestore) ---
+# (โค้ดดั้งเดิมของคุณตำรวจตั้งแต่จุดนี้เป็นต้นไป...)
 # --- 1. เชื่อมต่อฐานข้อมูล NoSQL (Firebase Firestore) ---
 @st.cache_resource
 def get_firestore_client():
