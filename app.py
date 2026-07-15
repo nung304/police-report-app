@@ -359,7 +359,7 @@ with tab2:
             st.markdown("### 📋 ข้อความสรุปรวม Line (รูปแบบใหม่)")
             
             joined_items_t2 = "\n".join(report_items_t2)
-            final_text_t2 = f"สภ.ไม้แก่น \nงานสอบสวน\nเรียนผู้บังคับบัญชา\nรายงานสรุปภารกิจประจำวันที่ {date_str}\n{joined_items_t2}\n\nจึงเรียนมาเพื่อโปรดทราบ"
+            final_text_t2 = f"สภ.ไม้แก่น \nงานสอบสวน\nเรียนผู้บังคับบัญชา\nรายงานสรุปผลการปฏิบัติวันที่ {date_str}\n{joined_items_t2}\n\nจึงเรียนมาเพื่อโปรดทราบ"
             
             st.code(final_text_t2, language="text")
             st.success("👆 แตะปุ่มไอคอนสี่เหลี่ยมซ้อนกันที่มุมขวาบนเพื่อ Copy ไปส่งกลุ่ม Line สรุปงานประจำวันได้ทันที")
