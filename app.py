@@ -15,20 +15,18 @@ st.set_page_config(
 # --- วางแทรกใต้ st.set_page_config(...) ---
 st.markdown(
     """
-    <head>
-        <!-- ชื่อที่จะโชว์ในลิงก์ LINE -->
-        <meta property="og:title" content="ระบบรายงานสรุปผลการปฏิบัติงาน สภ.ไม้แก่น" />
-        
-        <!-- รายละเอียดใต้ลิงก์ -->
-        <meta property="og:description" content="โปรแกรมช่วยงานสอบสวน สภ.ไม้แก่น สำหรับคัดลอกข้อความรายงานลงกลุ่ม Line" />
-        
-        <!-- ลิงก์ภาพสวยๆ จาก GitHub ของคุณตำรวจ -->
-        <meta property="og:image" content="https://github.com/nung304/police-report-app/blob/main/75858736-e9f9-4ae3-ad7b-2cc685c5f76e.png?raw=true" />
-        
-        <!-- ลิงก์ของแอป -->
-        <meta property="og:url" content="https://police-report.streamlit.app/" />
-        <meta property="og:type" content="website" />
-    </head>
+    <div style="display:none;">
+        <head>
+            <meta property="og:title" content="ระบบรายงานสรุปผลการปฏิบัติงาน สภ.ไม้แก่น" />
+            
+            <meta property="og:description" content="โปรแกรมช่วยงานสอบสวน สภ.ไม้แก่น สำหรับคัดลอกข้อความรายงานลงกลุ่ม Line" />
+            
+            <meta property="og:image" content="https://github.com/nung304/police-report-app/blob/main/75858736-e9f9-4ae3-ad7b-2cc685c5f76e.png?raw=true" />
+            
+            <meta property="og:url" content="https://police-report.streamlit.app/" />
+            <meta property="og:type" content="website" />
+        </head>
+    </div>
     """,
     unsafe_allow_html=True
 )
