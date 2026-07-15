@@ -13,37 +13,45 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- 2. โค้ดส่ง Meta Tags ซ่อนตัวเพื่อบังคับ LINE ดึงรูปและคำอธิบายที่เรากำหนดเอง ---
-st.markdown(
+# --- 2. ส่ง Meta Tags ซ่อนตัวเพื่อบังคับ LINE ดึงรูปและคำอธิบายที่เรากำหนดเอง ---
+# (ใช้ st.html เพื่อฉีดโค้ดและซ่อนไม่ให้มีปุ่ม Copy โค้ดโผล่ขึ้นมาบนหน้าเว็บอย่างเด็ดขาด)
+st.html(
     """
-    <div style="display:none;">
+    <style>
+        /* ซ่อนพื้นที่แสดงผลของส่วนหัวพิเศษนี้ */
+        .hidden-metadata { display: none !important; }
+    </style>
+    <div class="hidden-metadata">
         <p>ระบบรายงานสรุปผลการปฏิบัติงาน สภ.ไม้แก่น</p>
         <span data-og-title="ระบบรายงานสรุปผลการปฏิบัติงาน สภ.ไม้แก่น"></span>
         <span data-og-description="โปรแกรมช่วยงานสอบสวน สภ.ไม้แก่น สำหรับคัดลอกข้อความรายงานลงกลุ่ม Line"></span>
         <span data-og-image="https://github.com/nung304/police-report-app/blob/main/75858736-e9f9-4ae3-ad7b-2cc685c5f76e.png?raw=true"></span>
     </div>
     <script>
-        // บังคับเปลี่ยนค่า Meta Tags ในระบบของ Streamlit ทันทีที่หน้าเว็บโหลด
+        // บังคับอัปเดตและเขียน Meta Tags ลงบนส่วน Head ของเว็บเบราว์เซอร์โดยตรง
         document.title = "ระบบรายงานสรุปผลการปฏิบัติงาน สภ.ไม้แก่น";
         
-        const metaTitle = document.querySelector('meta[property="og:title"]') || document.createElement('meta');
-        metaTitle.setAttribute('property', 'og:title');
-        metaTitle.content = "ระบบรายงานสรุปผลการปฏิบัติงาน สภ.ไม้แก่น";
-        document.head.appendChild(metaTitle);
+        const updateOrCreateMeta = (property, content) => {
+            let meta = document.querySelector(`meta[property="${property}"]`);
+            if (!meta) {
+                meta = document.createElement('meta');
+                meta.setAttribute('property', property);
+                document.head.appendChild(meta);
+            }
+            meta.content = content;
+        };
 
-        const metaDesc = document.querySelector('meta[property="og:description"]') || document.createElement('meta');
-        metaDesc.setAttribute('property', 'og:description');
-        metaDesc.content = "โปรแกรมช่วยงานสอบสวน สภ.ไม้แก่น สำหรับคัดลอกข้อความรายงานลงกลุ่ม Line";
-        document.head.appendChild(metaDesc);
-
-        const metaImg = document.querySelector('meta[property="og:image"]') || document.createElement('meta');
-        metaImg.setAttribute('property', 'og:image');
-        metaImg.content = "https://github.com/nung304/police-report-app/blob/main/75858736-e9f9-4ae3-ad7b-2cc685c5f76e.png?raw=true";
-        document.head.appendChild(metaImg);
+        updateOrCreateMeta("og:title", "ระบบรายงานสรุปผลการปฏิบัติงาน สภ.ไม้แก่น");
+        updateOrCreateMeta("og:description", "โปรแกรมช่วยงานสอบสวน สภ.ไม้แก่น สำหรับคัดลอกข้อความรายงานลงกลุ่ม Line");
+        updateOrCreateMeta("og:image", "https://github.com/nung304/police-report-app/blob/main/75858736-e9f9-4ae3-ad7b-2cc685c5f76e.png?raw=true");
+        updateOrCreateMeta("og:url", "https://police-report.streamlit.app/");
+        updateOrCreateMeta("og:type", "website");
     </script>
-    """,
-    unsafe_allow_html=True
+    """
 )
+
+# --- 3. เชื่อมต่อฐานข้อมูล NoSQL (Firebase Firestore) ---
+# (โค้ดส่วนที่เหลือของคุณตำรวจทำงานต่อไปตามปกติได้เลยครับ...)
 
 # --- 3. เชื่อมต่อฐานข้อมูล NoSQL (Firebase Firestore) ---
 # (โค้ดดั้งเดิมของคุณตำรวจตั้งแต่จุดนี้เป็นต้นไป...)
