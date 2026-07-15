@@ -317,9 +317,9 @@ with tab2:
                 selected_officer_t2 = st.selectbox(f"👮‍♂️ ผู้ปฏิบัติหลัก คนที่ {i+1}", list(officer_options.keys()), key=f"t2_off_{i}")
                 officer_t2 = officer_options[selected_officer_t2]
                 
-                # [ระบบใหม่ในข้อ] ตัวเลือกสำหรับเพิ่มรายชื่อผู้ปฏิบัติร่วมในแต่ละภารกิจย่อย
+                # ตัวเลือกสำหรับเพิ่มรายชื่อผู้ปฏิบัติร่วมในภารกิจย่อย (เหมือนกันกับ Tab 1)
                 with_team_t2 = st.checkbox("➕ มีผู้ปฏิบัติร่วมในภารกิจนี้", value=False, key=f"t2_with_team_{i}")
-                team_member_text_t2 = ""
+                team_member_lines_t2 = ""
                 has_team_names_t2 = False
                 
                 if with_team_t2:
@@ -328,12 +328,13 @@ with tab2:
                         team_select_t2 = st.selectbox(f"👤 เลือกผู้ปฏิบัติร่วมคนที่ {j+1} (ภารกิจที่ {i+1})", ["-- ไม่ระบุชื่อ (ใช้พร้อมพวก) --"] + list(officer_options.keys()), key=f"t2_team_member_{i}_{j}")
                         if team_select_t2 != "-- ไม่ระบุชื่อ (ใช้พร้อมพวก) --":
                             member_t2 = officer_options[team_select_t2]
-                            team_member_text_t2 += f", {member_t2['rank']}{member_t2['name']}"
+                            # จัดให้เรียงลงบรรทัดล่าง มีชื่อและตำแหน่งครบถ้วน
+                            team_member_lines_t2 += f"\n{member_t2['rank']}{member_t2['name']}\n{member_t2['position']}"
                             has_team_names_t2 = True
                 
                 suffix_t2 = ""
                 if with_team_t2:
-                    suffix_t2 = team_member_text_t2 if has_team_names_t2 else " พร้อมพวก"
+                    suffix_t2 = " พร้อมด้วย" if has_team_names_t2 else " พร้อมพวก"
                 
                 # 2. ระบุเวลาเฉพาะของภารกิจนั้น
                 time_input_t2 = st.text_input(f"⏰ เวลาภารกิจที่ {i+1} (น.)", value="00.00", key=f"t2_time_{i}")
@@ -345,12 +346,12 @@ with tab2:
                 else:
                     task_detail_t2 = task_select_t2
                 
-                # จัดเรียงโครงสร้างข้อความแบบใหม่ที่รวมทีมผู้ปฏิบัติงานด้วย
+                # จัดเรียงโครงสร้างข้อความแบบใหม่: ผู้ปฏิบัติหลัก -> ตำแหน่ง -> (พร้อมด้วย -> ผู้ปฏิบัติร่วม + ตำแหน่ง) -> เวลา -> ภารกิจ
                 if task_detail_t2:
-                    item_text = f"{i+1}. ผู้ปฏิบัติ: {officer_t2['rank']}{officer_t2['name']}{suffix_t2}\n   * เวลา: {time_input_t2} น.\n   * ภารกิจ: {task_detail_t2}"
+                    item_text = f"{i+1}. ผู้ปฏิบัติ:\n   {officer_t2['rank']}{officer_t2['name']}\n   {officer_t2['position']}{suffix_t2}{team_member_lines_t2}\n   * เวลา: {time_input_t2} น.\n   * ภารกิจ: {task_detail_t2}"
                     report_items_t2.append(item_text)
                     
-                st.divider() # ขีดเส้นกั้นจบแต่ละรายการเพื่อความเรียบร้อย เลย์เอาต์ไม่พัง
+                st.divider() # ขีดเส้นกั้นจบแต่ละรายการ
 
     # คอลัมน์แสดงผลลัพธ์ของแพตเทิร์นข้อความชุดใหม่
     with t2_col2:
