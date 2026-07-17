@@ -232,10 +232,21 @@ def load_tasks():
 personnel_list = load_personnel()
 tasks_data = load_tasks()
 
+# สร้างตัวเลือกเจ้าหน้าที่ทั้งหมด
 officer_options = {}
 for p in personnel_list:
     key_name = f"{p['rank']}{p['name']} ({p['position']})"
     officer_options[key_name] = p
+
+# คัดกรองรายชื่อเฉพาะ "ร้อยเวร" (ยศ ร.ต.ต. ขึ้นไป และ ตำแหน่งต้องไม่มีคำว่า รอง ผกก)
+allowed_inspector_ranks = ["พล.ต.อ.", "พล.ต.ท.", "พล.ต.ต.", "พ.ต.อ.", "พ.ต.ท.", "พ.ต.ต.", "ร.ต.อ.", "ร.ต.ท.", "ร.ต.ต."]
+inspector_options = {}
+for p in personnel_list:
+    is_rank_ok = p['rank'].strip() in allowed_inspector_ranks
+    is_not_deputy = "รอง ผกก" not in p['position']
+    if is_rank_ok and is_not_deputy:
+        key_name = f"{p['rank']}{p['name']} ({p['position']})"
+        inspector_options[key_name] = p
 
 raw_tasks_list = [t["task_detail"] for t in tasks_data]
 
@@ -257,8 +268,20 @@ with tab1:
     
     with t2_col1:
         with st.container(border=True):
-            st.markdown("### 📝 สรุปรายการภารกิจวันนี้")
+            st.markdown("### 🔍 เลือกตัวเลือกร้อยเวรสอบสวนประจำวัน")
+            # ช่องเลือกบุคคลทำหน้าที่ร้อยเวร
+            selected_inspector = st.selectbox(
+                "👮‍♂️ เลือกผู้ปฏิบัติหน้าที่ร้อยเวรสอบสวน", 
+                options=["-- ไม่ระบุร้อยเวรประจำวัน --"] + list(inspector_options.keys()), 
+                key="t2_inspector_select"
+            )
             
+            inspector_text_block = ""
+            if selected_inspector != "-- ไม่ระบุร้อยเวรประจำวัน --":
+                ins_obj = inspector_options[selected_inspector]
+                inspector_text_block = f"{ins_obj['rank']}{ins_obj['name']}\n{ins_obj['position']}\nปฏิบัติหน้าที่ร้อยเวรสอบสวน\n"
+
+            st.markdown("### 📝 รายการภารกิจผู้ปฏิบัติงาน")
             no_cases = st.checkbox("❌ วันนี้ไม่มีประชาชนมาแจ้งความหรือลงบันทึกประจำวัน (เหตุการณ์ปกติ)", value=False, key="t2_no_cases")
             
             report_items_t2 = []
@@ -291,29 +314,19 @@ with tab1:
                     
                     time_input_t2 = st.text_input(f"⏰ เวลาภารกิจที่ {i+1} (น.)", value="08.30", key=f"t2_time_{i}")
                     
-                    # ปรับปรุงสำคัญ: ใช้ st.selectbox ทำหน้าที่เป็น Search box และ Text Input ไปในตัว
-                    # โดยการใส่ข้อความแนะนำในคลังลงไป และเปิดโอกาสให้ค้นหา/ถ้าไม่พบจะถือเป็นเรื่องพิมพ์ใหม่
                     st.markdown(f"🔍 **ค้นหาภารกิจจากคลัง หรือพิมพ์เรื่องใหม่ลงไปได้เลย**")
                     
-                    # คอนโทรลค่าในช่องพิมพ์ด้วย State
-                    state_key = f"t2_task_state_val_{i}"
-                    if state_key not in st.session_state:
-                        st.session_state[state_key] = ""
-                    
-                    # ใช้ป้อนคำแนะนำแบบดรอปดาวน์ที่พิมพ์ค้นหาพิมพ์สดลงไปได้
                     task_detail_t2 = st.selectbox(
-                        f"พิมพ์พิมพ์ค้นหา หรือเลือกภารกิจที่ {i+1}",
+                        f"พิมพ์ค้นหา หรือเลือกภารกิจที่ {i+1}",
                         options=[""] + raw_tasks_list,
                         key=f"t2_mixed_select_{i}"
                     )
                     
-                    # ตัวเลือกเพิ่มเติม: หากไม่มีในคลัง ให้สามารถเปิดกล่องพิมพ์สดเรื่องใหม่ได้ตรงนี้ทันที
                     is_custom = st.checkbox(f"✍️ พิมพ์เรื่องใหม่ (กรณีไม่มีในตัวเลือกด้านบน)", value=False, key=f"t2_custom_check_{i}")
                     
                     if is_custom:
                         task_detail_t2 = st.text_input(f"✏️ พิมพ์รายละเอียดภารกิจใหม่ที่ {i+1}", value="", key=f"t2_custom_write_{i}")
                         
-                        # หากพิมพ์เรื่องใหม่ จะปรากฏปุ่มสีเขียวเพื่อกดเก็บเข้าคลัง NoSQL ได้ทันที
                         if task_detail_t2.strip():
                             st.markdown('<div class="inline-save-btn">', unsafe_allow_html=True)
                             if st.button(f"💾 บันทึกภารกิจนี้เข้าคลังถาวร", key=f"inline_save_btn_{i}"):
@@ -340,10 +353,10 @@ with tab1:
             st.markdown("### 📋 ข้อความสรุปรวม Line")
             
             if no_cases:
-                final_text_t2 = f"สภ.ไม้แก่น \nงานสอบสวน\nเรียนผู้บังคับบัญชา\nรายงานสรุปผลการปฏิบัติประจำวันที่ {date_str}\nไม่มีประชาชนมาแจ้งความหรือลงบันทึกประจำวันแต่อย่างใด\nเหตุการณ์ทั่วไปปกติ\n\nจึงเรียนมาเพื่อโปรดทราบ"
+                final_text_t2 = f"สภ.ไม้แก่น \nงานสอบสวน\nเรียนผู้บังคับบัญชา\nรายงานสรุปผลการปฏิบัติประจำวันที่ {date_str}\n{inspector_text_block}ไม่มีประชาชนมาแจ้งความหรือลงบันทึกประจำวันแต่อย่างใด\nเหตุการณ์ทั่วไปปกติ\n\nจึงเรียนมาเพื่อโปรดทราบ"
             else:
                 joined_items_t2 = "\n".join(report_items_t2)
-                final_text_t2 = f"สภ.ไม้แก่น \nงานสอบสวน\nเรียนผู้บังคับบัญชา\nรายงานสรุปผลการปฏิบัติประจำวันที่ {date_str}\n{joined_items_t2}\n\nจึงเรียนมาเพื่อโปรดทราบ"
+                final_text_t2 = f"สภ.ไม้แก่น \nงานสอบสวน\nเรียนผู้บังคับบัญชา\nรายงานสรุปผลการปฏิบัติประจำวันที่ {date_str}\n{inspector_text_block}{joined_items_t2}\n\nจึงเรียนมาเพื่อโปรดทราบ"
             
             st.code(final_text_t2, language="text")
             st.success("👆 แตะปุ่มไอคอนสี่เหลี่ยมซ้อนกันที่มุมขวาบนเพื่อ Copy ไปส่งกลุ่ม Line สรุปงานประจำวันได้ทันที")
