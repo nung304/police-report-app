@@ -268,18 +268,17 @@ with tab1:
     
     with t2_col1:
         with st.container(border=True):
-            st.markdown("### 🔍 เลือกตัวเลือกร้อยเวรสอบสวนประจำวัน")
-            # ช่องเลือกบุคคลทำหน้าที่ร้อยเวร
+            st.markdown("### 🔍 เลือกร้อยเวรสอบสวนประจำวัน")
+            # เอาตัวเลือกคำว่า "ไม่ระบุ" ออก เพื่อบังคับให้มีชื่อร้อยเวรแสดงเสมอทุกครั้ง
             selected_inspector = st.selectbox(
-                "👮‍♂️ เลือกผู้ปฏิบัติหน้าที่ร้อยเวรสอบสวน", 
-                options=["-- ไม่ระบุร้อยเวรประจำวัน --"] + list(inspector_options.keys()), 
+                "👮‍♂️ ร้อยเวรสอบสวนปฏิบัติหน้าที่วันนี้", 
+                options=list(inspector_options.keys()), 
                 key="t2_inspector_select"
             )
             
-            inspector_text_block = ""
-            if selected_inspector != "-- ไม่ระบุร้อยเวรประจำวัน --":
-                ins_obj = inspector_options[selected_inspector]
-                inspector_text_block = f"{ins_obj['rank']}{ins_obj['name']}\n{ins_obj['position']}\nปฏิบัติหน้าที่ร้อยเวรสอบสวน\n"
+            # ดึงข้อมูลร้อยเวรมาจัดรูปแบบแยกบรรทัด
+            ins_obj = inspector_options[selected_inspector]
+            inspector_text_block = f"{ins_obj['rank']}{ins_obj['name']}\n{ins_obj['position']}\nปฏิบัติหน้าที่ร้อยเวรสอบสวน\n"
 
             st.markdown("### 📝 รายการภารกิจผู้ปฏิบัติงาน")
             no_cases = st.checkbox("❌ วันนี้ไม่มีประชาชนมาแจ้งความหรือลงบันทึกประจำวัน (เหตุการณ์ปกติ)", value=False, key="t2_no_cases")
