@@ -4,6 +4,7 @@ import google.auth
 from google.cloud import firestore
 from google.oauth2 import service_account
 import time
+import urllib.parse
 
 # --- 1. ตั้งค่าหน้าจอ ---
 st.set_page_config(
@@ -50,7 +51,11 @@ st.html(
 # --- 3. เชื่อมต่อฐานข้อมูล NoSQL (Firebase Firestore) ---
 @st.cache_resource
 def get_firestore_client():
-    credentials_info = st.secrets["firebase"]
+    credentials_info = dict(st.secrets["firebase"])
+    # จัดฟอร์แมต private_key แก้ปัญหา InvalidArgument Error บน Streamlit Cloud
+    if "private_key" in credentials_info:
+        credentials_info["private_key"] = credentials_info["private_key"].replace("\\n", "\n")
+        
     creds = service_account.Credentials.from_service_account_info(credentials_info)
     db = firestore.Client(credentials=creds, project=credentials_info["project_id"])
     return db
@@ -269,14 +274,12 @@ with tab1:
     with t2_col1:
         with st.container(border=True):
             st.markdown("### 🔍 เลือกร้อยเวรสอบสวนประจำวัน")
-            # เปลี่ยนเป็นใส่ค่าตัวเลือกแรกให้เป็นช่องว่าง เพื่อบังคับให้ผู้ใช้กดเลือก
             selected_inspector = st.selectbox(
                 "👮‍♂️ เลือกรายชื่อร้อยเวรสอบสวนปฏิบัติหน้าที่วันนี้", 
                 options=[""] + list(inspector_options.keys()), 
                 key="t2_inspector_select"
             )
             
-            # ตรวจสอบเงื่อนไข: ถ้ายังไม่ได้เลือก (เป็นค่าว่าง) จะยังไม่เพิ่มข้อมูลลงในกล่องข้อความ
             inspector_text_block = ""
             if selected_inspector != "":
                 ins_obj = inspector_options[selected_inspector]
@@ -361,6 +364,26 @@ with tab1:
             
             st.code(final_text_t2, language="text")
             st.success("👆 แตะปุ่มไอคอนสี่เหลี่ยมซ้อนกันที่มุมขวาบนเพื่อ Copy ไปส่งกลุ่ม Line สรุปงานประจำวันได้ทันที")
+            
+            # --- ปุ่มกดแชร์เข้า LINE ทันที ---
+            line_share_url_t1 = f"https://line.me/R/msg/text/?{urllib.parse.quote(final_text_t2)}"
+            st.markdown(f'''
+                <a href="{line_share_url_t1}" target="_blank" style="text-decoration: none;">
+                    <button style="
+                        width: 100%;
+                        background-color: #06C755 !important;
+                        color: white !important;
+                        border: none;
+                        padding: 12px;
+                        font-size: 16px;
+                        font-weight: bold;
+                        border-radius: 10px;
+                        cursor: pointer;
+                        margin-top: 10px;">
+                        💬 เปิด LINE เพื่อส่งข้อความนี้
+                    </button>
+                </a>
+            ''', unsafe_allow_html=True)
 
 
 # ----------------- TAB 2: รายงานรูปแบบเดิม (เดี่ยว/พร้อมพวก) -----------------
@@ -450,6 +473,26 @@ with tab2:
 
             st.code(report_text, language="text")
             st.success("👆 แตะปุ่มไอคอนสี่เหลี่ยมซ้อนกันที่มุมขวาบนเพื่อ Copy")
+
+            # --- ปุ่มกดแชร์เข้า LINE ทันที ---
+            line_share_url_t2 = f"https://line.me/R/msg/text/?{urllib.parse.quote(report_text)}"
+            st.markdown(f'''
+                <a href="{line_share_url_t2}" target="_blank" style="text-decoration: none;">
+                    <button style="
+                        width: 100%;
+                        background-color: #06C755 !important;
+                        color: white !important;
+                        border: none;
+                        padding: 12px;
+                        font-size: 16px;
+                        font-weight: bold;
+                        border-radius: 10px;
+                        cursor: pointer;
+                        margin-top: 10px;">
+                        💬 เปิด LINE เพื่อส่งข้อความนี้
+                    </button>
+                </a>
+            ''', unsafe_allow_html=True)
 
 
 # --- แผงควบคุมหลังบ้าน ---
