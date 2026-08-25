@@ -1,29 +1,3 @@
-# --- 3. เชื่อมต่อฐานข้อมูล NoSQL (Firebase Firestore) ---
-@st.cache_resource
-def get_firestore_client():
-    # ดึงค่า secrets
-    cred_dict = dict(st.secrets["firebase"])
-
-    # จัดการ fix private_key กรณีถูก escape เป็น \\n
-    if "private_key" in cred_dict:
-        cred_dict["private_key"] = cred_dict["private_key"].replace(
-            "\\n", "\n"
-        )
-
-    creds = service_account.Credentials.from_service_account_info(cred_dict)
-    db = firestore.Client(credentials=creds, project=cred_dict["project_id"])
-    return db
-
-
-db = get_firestore_client()
-
-```
-
----
-
-### โค้ดฉบับสมบูรณ์ที่แก้ไขแล้ว
-
-```python
 from datetime import datetime
 import time
 from google.cloud import firestore
@@ -751,5 +725,3 @@ with st.expander(
           st.toast("📝 แก้ไขข้อความสำเร็จ!", icon="🎉")
           time.sleep(1)
           st.rerun()
-
-```
