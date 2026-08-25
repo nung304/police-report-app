@@ -1,10 +1,3 @@
-ข้อผิดพลาด **`google.api_core.exceptions.InvalidArgument`** เกิดจากโครงสร้างข้อมูลใน `st.secrets["firebase"]` โดนแปลงค่า `private_key` โดยตัวอักษรขึ้นบรรทัดใหม่ (`\n`) ใน Secret Manager ถูก escape กลายเป็น `\\n` หรือ รูปแบบ Dict ของ Service Account credential ไม่สมบูรณ์
-
-แก้ไขจุดนี้ได้โดยการใช้ `.stream()` และแปลง `private_key` ให้ถูกต้องก่อนสร้าง `Credentials`
-
-**โค้ดส่วนที่ต้องแก้ไข (แทนที่ส่วน `--- 3. เชื่อมต่อฐานข้อมูล NoSQL ---`)**
-
-```python
 # --- 3. เชื่อมต่อฐานข้อมูล NoSQL (Firebase Firestore) ---
 @st.cache_resource
 def get_firestore_client():
