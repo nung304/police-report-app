@@ -50,49 +50,60 @@ def upload_to_drive(file_obj, filename, folder_id):
         uploaded_file = service.files().create(
             body=file_metadata,
             media_body=media,
-            fields='id, webViewLink, webContentLink'
+            fields='id, webViewLink'
         ).execute()
         
-        # ปรับสิทธิ์ไฟล์เป็น Anyone with link can view (สำหรับแสดงผลรูป)
         permission = {'type': 'anyone', 'role': 'reader'}
         service.permissions().create(fileId=uploaded_file.get('id'), body=permission).execute()
         
-        # สร้าง Direct Image URL สำหรับแสดงผล
         direct_url = f"https://lh3.googleusercontent.com/d/{uploaded_file.get('id')}"
         return direct_url
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการอัปโหลดไฟล์ไป Google Drive: {e}")
         return None
 
-# --- 4. ฟังก์ชันส่งการแจ้งเตือนผ่าน LINE Notify / Messaging API ---
-def send_line_notify(message_text):
+# --- 4. ฟังก์ชันส่ง LINE Push Message (พร้อมภาพ) ---
+def send_line_message(text_message, image_urls=None):
     try:
         line_token = st.secrets["line"]["channel_access_token"]
         group_id = st.secrets["line"]["group_id"]
         
         url = "https://api.line.me/v2/bot/message/push"
         headers = {
-            "Content-Type": "json",
+            "Content-Type": "application/json",
             "Authorization": f"Bearer {line_token}"
         }
+        
+        messages = [
+            {
+                "type": "text",
+                "text": text_message
+            }
+        ]
+        
+        if image_urls:
+            for img_url in image_urls[:4]:  # จำกัดส่งไม่เกิน 4 รูปตามโควต้า LINE
+                messages.append({
+                    "type": "image",
+                    "originalContentUrl": img_url,
+                    "previewImageUrl": img_url
+                })
+                
         payload = {
             "to": group_id,
-            "messages": [
-                {
-                    "type": "text",
-                    "text": message_text
-                }
-            ]
+            "messages": messages
         }
-        requests.post(url, json=payload, headers=headers)
+        res = requests.post(url, json=payload, headers=headers)
+        return res.status_code == 200
     except Exception as e:
         st.warning(f"ไม่สามารถส่งการแจ้งเตือน LINE ได้: {e}")
+        return False
 
 # --- 5. จัดลำดับยศตำรวจ ---
 def get_rank_priority(rank_str):
     ranks_priority = {
         "พล.ต.อ.": 1, "พล.ต.ท.": 2, "พล.ต.ต.": 3, "พ.ต.อ.": 4, "พ.ต.ท.": 5,
-        "พ.ต.ต.": 6, "ร.ต.อ.": 7, "ร.ต.ฮ.": 8, "ร.ต.ต.": 9, "ด.ต.": 10,
+        "พ.ต.ต.": 6, "ร.ต.อ.": 7, "ร.ต.ท.": 8, "ร.ต.ต.": 9, "ด.ต.": 10,
         "จ.ส.ต.": 11, "ส.ต.อ.": 12, "ส.ต.ท.": 13, "ส.ต.ต.": 14,
     }
     return ranks_priority.get(rank_str.strip(), 99)
@@ -161,47 +172,61 @@ def load_tasks():
     except Exception as e:
         return [{"id": str(i), "task_detail": t} for i, t in enumerate(default_tasks)]
 
-# --- 7. ส่วนแสดงผล UI หน้าแอปพลิเคชัน ---
+# --- 7. ส่วนการจัดการ UI และสร้างรายงาน ---
 st.title("👮‍♂️ ระบบบันทึกรายงานผลการปฏิบัติงาน")
 st.caption("งานสอบสวน สถานีตำรวจภูธรไม้แก่น")
 
 personnel_list = load_personnel()
 task_list = load_tasks()
 
-with st.form("report_form", clear_on_submit=True):
-    st.subheader("📝 กรอกข้อมูลรายงานผลการปฏิบัติงาน")
-    
-    # เลือกระบุวันที่
-    report_date = st.date_input("วันที่ปฏิบัติงาน", datetime.date.today())
-    
-    # เลือกชื่อผู้รายงาน
-    personnel_options = [f"{p['rank']} {p['name']} ({p['position']})" for p in personnel_list]
-    selected_personnel = st.selectbox("ข้าราชการตำรวจผู้รายงาน", personnel_options)
-    
-    # เลือกภารกิจ
-    task_options = [t['task_detail'] for t in task_list] + ["อื่นๆ (ระบุเอง)"]
-    selected_task = st.selectbox("ภารกิจที่ได้รับมอบหมาย", task_options)
-    
-    custom_task = ""
-    if selected_task == "อื่นๆ (ระบุเอง)":
-        custom_task = st.text_area("รายละเอียดภารกิจเพิ่มเติม")
-        
-    # อัปโหลดรูปภาพผลการปฏิบัติงาน
-    uploaded_files = st.file_uploader(
-        "แนบรูปภาพผลการปฏิบัติงาน (อัปโหลดเข้า Google Drive)", 
-        type=["jpg", "jpeg", "png"], 
-        accept_multiple_files=True
-    )
-    
-    submit_button = st.form_submit_button("บันทึกและส่งรายงาน")
+st.subheader("📝 สร้างข้อความรายงานผลการปฏิบัติงาน")
 
-if submit_button:
-    task_final = custom_task if selected_task == "อื่นๆ (ระบุเอง)" else selected_task
-    
-    if not task_final.strip():
-        st.error("กรุณาระบุรายละเอียดภารกิจ")
-    else:
-        with st.spinner("กำลังบันทึกข้อมูลและอัปโหลดรูปภาพ..."):
+# วันที่ปฏิบัติงาน
+report_date = st.date_input("วันที่ปฏิบัติงาน", datetime.date.today())
+th_year = report_date.year + 543
+date_str = f"{report_date.day}/{report_date.month}/{th_year}"
+
+# เลือกเจ้าหน้าที่
+personnel_names = [f"{p['rank']} {p['name']}" for p in personnel_list]
+selected_personnel = st.multiselect("ข้าราชการตำรวจผู้ปฏิบัติงาน", personnel_names, default=personnel_names[-1:] if personnel_names else None)
+
+# เลือกภารกิจ
+task_options = [t['task_detail'] for t in task_list] + ["อื่นๆ (ระบุเอง)"]
+selected_task = st.selectbox("ภารกิจที่ได้รับมอบหมาย", task_options)
+
+custom_task = ""
+if selected_task == "อื่นๆ (ระบุเอง)":
+    custom_task = st.text_area("รายละเอียดภารกิจเพิ่มเติม")
+
+final_task_detail = custom_task if selected_task == "อื่นๆ (ระบุเอง)" else selected_task
+
+# แนบรูปภาพผลการปฏิบัติงาน
+uploaded_files = st.file_uploader("📸 แนบรูปภาพผลการปฏิบัติงาน (อัปโหลดเข้า Google Drive เพื่อส่งเข้า LINE)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+
+st.divider()
+
+# รวมข้อความรายงานผลสำหรับนำไปส่ง LINE
+officers_text = "\n".join([f"- {name}" for name in selected_personnel])
+line_report_text = f"""เรียน ผู้บังคับบัญชา
+งานสอบสวน สภ.ไม้แก่น ขอรายงานผลการปฏิบัติงาน ประจำวันที่ {date_str}
+
+📌 ภารกิจ:
+{final_task_detail}
+
+👮‍♂️ ผู้ปฏิบัติงาน:
+{officers_text}
+
+จึงเรียนมาเพื่อโปรดทราบ"""
+
+st.subheader("📋 ข้อความสำหรับส่ง LINE")
+st.code(line_report_text, language="text")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    # ปุ่มกดส่งไลน์อัตโนมัติพร้อมแนบรูป
+    if st.button("🚀 บันทึกข้อมูล & ส่งเข้ากลุ่ม LINE", type="primary"):
+        with st.spinner("กำลังอัปโหลดรูปภาพและส่งข้อความเข้า LINE..."):
             image_urls = []
             folder_id = st.secrets["gdrive"]["folder_id"]
             
@@ -213,24 +238,25 @@ if submit_button:
                     if url:
                         image_urls.append(url)
             
-            # บันทึกลง Firestore
+            # บันทึกข้อมูลลง Firestore
             try:
                 db = get_firestore_db()
-                report_data = {
+                db.collection("reports").add({
                     "report_date": report_date.strftime("%Y-%m-%d"),
-                    "reporter": selected_personnel,
-                    "task_detail": task_final,
+                    "reporters": selected_personnel,
+                    "task_detail": final_task_detail,
                     "images": image_urls,
                     "created_at": firestore.SERVER_TIMESTAMP
-                }
-                db.collection("reports").add(report_data)
-                
-                # ส่งแจ้งเตือนทาง LINE
-                line_msg = f"\n📢 **รายงานผลการปฏิบัติงาน**\n📅 วันที่: {report_date.strftime('%d/%m/%Y')}\n👤 ผู้รายงาน: {selected_personnel}\n📌 ภารกิจ: {task_final}"
-                if image_urls:
-                    line_msg += f"\n🖼️ รูปภาพ ({len(image_urls)} รูป): {image_urls[0]}"
-                send_line_notify(line_msg)
-                
-                st.success("บันทึกข้อมูลและส่งรายงานเรียบร้อยแล้ว!")
+                })
             except Exception as e:
-                st.error(f"เกิดข้อผิดพลาดในการบันทึกข้อมูล: {e}")
+                st.error(f"เกิดข้อผิดพลาดในการบันทึกลงฐานข้อมูล: {e}")
+            
+            # ส่ง LINE Message
+            success = send_line_message(line_report_text, image_urls)
+            if success:
+                st.success("ส่งรายงานและรูปภาพเข้ากลุ่ม LINE เรียบร้อยแล้ว!")
+            else:
+                st.error("เกิดข้อผิดพลาดในการส่งข้อความเข้ากลุ่ม LINE")
+
+with col2:
+    st.caption("สามารถคัดลอกชุดข้อความในกล่องด้านบนเพื่อส่งแมนนวลได้เช่นกันครับ")
