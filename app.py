@@ -104,7 +104,7 @@ def upload_image_to_gdrive(file_obj, filename, mime_type):
     image_url = f"https://lh3.googleusercontent.com/d/{file_id}"
 
     # บันทึกข้อมูลลง Firestore
-    doc_ref = db.collection("report_images").add({
+    db.collection("report_images").add({
         "file_id": file_id,
         "filename": filename,
         "image_url": image_url,
@@ -131,11 +131,11 @@ def fetch_images_by_status(status_type):
 
 
 def mark_images_as_sent(image_doc_ids):
+    batch = db.batch()
     for doc_id in image_doc_ids:
-        db.collection("report_images").document(doc_id).update({
-            "status": "sent",
-            "sent_at": datetime.now(),
-        })
+        ref = db.collection("report_images").document(doc_id)
+        batch.update(ref, {"status": "sent", "sent_at": datetime.now()})
+    batch.commit()
 
 
 # --- 5. ฟังก์ชันส่งข้อความและภาพผ่าน LINE Messaging API ---
@@ -272,7 +272,7 @@ st.markdown(
 )
 
 
-# --- 7. โหลดข้อมูลตำรวจและภารกิจ ---
+# --- 7. โหลดข้อมูลตำรวจและภารกิจ (เพิ่ม Cache ป้องกันหน้าจอโหลดค้าง) ---
 def get_rank_priority(rank_str):
     ranks_priority = {
         "พล.ต.อ.": 1,
@@ -293,6 +293,7 @@ def get_rank_priority(rank_str):
     return ranks_priority.get(rank_str.strip(), 99)
 
 
+@st.cache_data(ttl=300)
 def load_personnel():
     docs = db.collection("personnel").stream()
     personnel = []
@@ -339,14 +340,19 @@ def load_personnel():
                 "position": "ผบ.หมู่(นปพ.) สภ.ไม้แก่น ปฏิบัติหน้าที่ งานสอบสวน",
             },
         ]
+        batch = db.batch()
         for p in default_p:
-            db.collection("personnel").add(p)
-        st.rerun()
+            doc_ref = db.collection("personnel").document()
+            batch.set(doc_ref, p)
+            p["id"] = doc_ref.id
+            personnel.append(p)
+        batch.commit()
 
     personnel.sort(key=lambda x: get_rank_priority(x["rank"]))
     return personnel
 
 
+@st.cache_data(ttl=300)
 def load_tasks():
     docs = db.collection("tasks").stream()
     tasks = []
@@ -372,9 +378,12 @@ def load_tasks():
                 " กลุ่มงานตรวจพิสูจน์ยาเสพติด พิสูจน์หลักฐานจังหวัดปัตตานี"
             ),
         ]
+        batch = db.batch()
         for t in default_tasks:
-            db.collection("tasks").add({"task_detail": t})
-        st.rerun()
+            doc_ref = db.collection("tasks").document()
+            batch.set(doc_ref, {"task_detail": t})
+            tasks.append({"id": doc_ref.id, "task_detail": t})
+        batch.commit()
     return tasks
 
 
