@@ -1,25 +1,27 @@
-import streamlit as st
+import json
+import requests
 import firebase_admin
 from firebase_admin import credentials, firestore
-import requests
-import json
+import streamlit as st
 
 # ==========================================
 # 1. INITIALIZE FIREBASE (ระบบฐานข้อมูล)
 # ==========================================
 if not firebase_admin._apps:
     try:
-        # แปลง st.secrets["firebase"] ให้เป็น Pure Dict เพื่อป้องกันปัญหา Certificate Error
-        firebase_dict = json.loads(json.dumps(dict(st.secrets["firebase"])))
+        # ดึงค่า Dict จาก Secrets
+        firebase_dict = dict(st.secrets["firebase"])
         
-        # จัดการเรื่อง \n ใน private_key ให้ถูกต้อง
-        if "private_key" in firebase_dict:
-            firebase_dict["private_key"] = firebase_dict["private_key"].replace("\\n", "\n")
+        # จัดการแปลง \n ใน private_key ให้ถูกต้อง ชัวร์ 100%
+        p_key = firebase_dict["private_key"]
+        p_key = p_key.replace("\\n", "\n").strip()
+        firebase_dict["private_key"] = p_key
         
         cred = credentials.Certificate(firebase_dict)
         firebase_admin.initialize_app(cred)
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการเชื่อมต่อ Firebase: {e}")
+        st.stop()  # หยุดการทำงาน ไม่ให้โปรแกรม Crash
 
 db = firestore.client()
 
@@ -50,7 +52,7 @@ def send_line_group_message(message_text):
         response = requests.post(url, headers=headers, json=payload, timeout=10)
         
         if response.status_code == 200:
-            return True, "ส่งรายงานเข้ากลุ่ม LINE เรียบร้อยแล้ว!"
+            return True, "ส่งรายงานเข้ากลุ่ม LINE สภ.ไม้แก่น เรียบร้อยแล้ว!"
         else:
             return False, f"ส่งไม่สำเร็จ (Status {response.status_code}): {response.text}"
             
