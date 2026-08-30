@@ -1,3 +1,5 @@
 streamlit
+requests
 google-api-core==2.24.1
 google-cloud-firestore==2.20.0
+firebase-admin
