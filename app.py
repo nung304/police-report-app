@@ -1,7 +1,9 @@
 from datetime import datetime
 import time
+import urllib.parse
 from google.cloud import firestore
 from google.oauth2 import service_account
+import requests
 import streamlit as st
 
 # --- 1. ตั้งค่าหน้าจอ ---
@@ -52,7 +54,6 @@ st.html(
 def get_firestore_client():
     cred_dict = dict(st.secrets["firebase"])
     if "private_key" in cred_dict:
-        # ล้างการเว้นบรรทัดให้รองรับทั้งแบบ \n และการขึ้นบรรทัดใหม่จริง
         cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n").strip()
 
     creds = service_account.Credentials.from_service_account_info(cred_dict)
@@ -62,7 +63,30 @@ def get_firestore_client():
 
 db = get_firestore_client()
 
-# --- ส่วนควบคุม CSS สำหรับจัดแต่งกรอบหน้าตาเว็บ ---
+
+# --- 4. ฟังก์ชันส่งข้อความผ่าน LINE Messaging API (LINE OA) ---
+def send_line_oa_push(message_text):
+    try:
+        line_secrets = st.secrets["line"]
+        token = line_secrets["channel_access_token"]
+        group_id = line_secrets["group_id"]
+
+        url = "https://api.line.me/v2/bot/message/push"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        }
+        payload = {
+            "to": group_id,
+            "messages": [{"type": "text", "text": message_text}],
+        }
+        res = requests.post(url, headers=headers, json=payload, timeout=10)
+        return res.status_code == 200, res.text
+    except Exception as e:
+        return False, str(e)
+
+
+# --- 5. ส่วนควบคุม CSS สำหรับจัดแต่งกรอบหน้าตาเว็บ ---
 st.markdown(
     """
     <style>
@@ -189,7 +213,7 @@ st.markdown(
 )
 
 
-# --- 4. ฟังก์ชัน โหลด/บันทึก และ จัดลำดับยศตำรวจ ---
+# --- 6. ฟังก์ชัน โหลด/บันทึก และ จัดลำดับยศตำรวจ ---
 def get_rank_priority(rank_str):
     ranks_priority = {
         "พล.ต.อ.": 1,
@@ -514,9 +538,38 @@ with tab1:
                 )
 
             st.code(final_text_t2, language="text")
-            st.success(
-                "👆 แตะปุ่มไอคอนสี่เหลี่ยมซ้อนกันที่มุมขวาบนเพื่อ Copy"
-                " ไปส่งกลุ่ม Line สรุปงานประจำวันได้ทันที"
+
+            # --- ปุ่มส่ง LINE OA ยิงตรงเข้ากลุ่ม ---
+            if st.button("🚀 ส่งรายงานเข้ากลุ่ม LINE ทันที (LINE OA)", key="btn_send_line_t1"):
+                with st.spinner("กำลังส่งรายงานเข้ากลุ่ม LINE..."):
+                    success, err_msg = send_line_oa_push(final_text_t2)
+                    if success:
+                        st.success("✅ ส่งรายงานเข้ากลุ่ม LINE เรียบร้อยแล้ว!")
+                    else:
+                        st.error(f"❌ ส่งข้อความไม่สำเร็จ: {err_msg}")
+
+            # --- ปุ่มแชร์เข้า LINE (LINE Share Target Picker) ---
+            encoded_t2 = urllib.parse.quote(final_text_t2)
+            line_share_url_t2 = f"https://line.me/R/share?text={encoded_t2}"
+            st.markdown(
+                f"""
+                <a href="{line_share_url_t2}" target="_blank" style="text-decoration: none;">
+                    <div style="
+                        background-color: #06C755;
+                        color: white;
+                        text-align: center;
+                        padding: 10px;
+                        border-radius: 10px;
+                        font-weight: bold;
+                        font-size: 15px;
+                        margin-top: 8px;
+                        margin-bottom: 8px;
+                        cursor: pointer;">
+                        🟢 เลือกแชท/กลุ่มเพื่อส่งรายงาน (LINE Share)
+                    </div>
+                </a>
+                """,
+                unsafe_allow_html=True,
             )
 
 with tab2:
@@ -637,7 +690,39 @@ with tab2:
    จึงเรียนมาเพื่อโปรดทราบ"""
 
             st.code(report_text, language="text")
-            st.success("👆 แตะปุ่มไอคอนสี่เหลี่ยมซ้อนกันที่มุมขวาบนเพื่อ Copy")
+
+            # --- ปุ่มส่ง LINE OA ยิงตรงเข้ากลุ่ม ---
+            if st.button("🚀 ส่งรายงานเข้ากลุ่ม LINE ทันที (LINE OA)", key="btn_send_line_t2"):
+                with st.spinner("กำลังส่งรายงานเข้ากลุ่ม LINE..."):
+                    success, err_msg = send_line_oa_push(report_text)
+                    if success:
+                        st.success("✅ ส่งรายงานเข้ากลุ่ม LINE เรียบร้อยแล้ว!")
+                    else:
+                        st.error(f"❌ ส่งข้อความไม่สำเร็จ: {err_msg}")
+
+            # --- ปุ่มแชร์เข้า LINE (LINE Share Target Picker) ---
+            encoded_t1 = urllib.parse.quote(report_text)
+            line_share_url_t1 = f"https://line.me/R/share?text={encoded_t1}"
+            st.markdown(
+                f"""
+                <a href="{line_share_url_t1}" target="_blank" style="text-decoration: none;">
+                    <div style="
+                        background-color: #06C755;
+                        color: white;
+                        text-align: center;
+                        padding: 10px;
+                        border-radius: 10px;
+                        font-weight: bold;
+                        font-size: 15px;
+                        margin-top: 8px;
+                        margin-bottom: 8px;
+                        cursor: pointer;">
+                        🟢 เลือกแชท/กลุ่มเพื่อส่งรายงาน (LINE Share)
+                    </div>
+                </a>
+                """,
+                unsafe_allow_html=True,
+            )
 
 st.markdown("---")
 with st.expander(
