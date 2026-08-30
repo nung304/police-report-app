@@ -64,8 +64,8 @@ def get_firestore_client():
 db = get_firestore_client()
 
 
-# --- 4. ฟังก์ชันส่งข้อความและรูปภาพผ่าน LINE Messaging API (LINE OA) ---
-def send_line_oa_push(message_text, image_urls=None):
+# --- 4. ฟังก์ชันส่งข้อความผ่าน LINE Messaging API (LINE OA) ---
+def send_line_oa_push(message_text):
     try:
         line_secrets = st.secrets["line"]
         token = line_secrets["channel_access_token"]
@@ -78,15 +78,6 @@ def send_line_oa_push(message_text, image_urls=None):
         }
         
         messages = [{"type": "text", "text": message_text}]
-        
-        # หากมี URL รูปภาพที่เป็น HTTPS Direct Link จะแนบส่งไปด้วย
-        if image_urls:
-            for img_url in image_urls:
-                messages.append({
-                    "type": "image",
-                    "originalContentUrl": img_url,
-                    "previewImageUrl": img_url
-                })
 
         payload = {
             "to": group_id,
@@ -533,20 +524,29 @@ with tab1:
                     " ตรวจสอบข้อความสรุปทางด้านขวาได้เลยครับ"
                 )
 
-            # --- เพิ่มส่วนอัปโหลดรูปภาพ ---
-            st.markdown("### 🖼️ แนบภาพถ่ายการปฏิบัติงาน ( Tab 1 )")
+            # --- ระบบอัปโหลดและเลือกภาพ (Tab 1) ---
+            st.markdown("### 🖼️ คลังอัปโหลดรูปภาพ")
             uploaded_files_t1 = st.file_uploader(
-                "เลือกรูปภาพภาพการปฏิบัติงาน",
+                "อัปโหลดรูปภาพเก็บเข้าคลัง (อัปได้เรื่อยๆ)",
                 type=["png", "jpg", "jpeg"],
                 accept_multiple_files=True,
-                key="t1_images"
+                key="t1_images_pool"
             )
+
+            selected_images_t1 = []
             if uploaded_files_t1:
-                st.markdown("**ตัวอย่างภาพที่เลือก:**")
-                img_cols = st.columns(min(len(uploaded_files_t1), 4))
+                st.markdown("📌 **ติ๊กเลือกรูปภาพที่ต้องการใช้แนบส่งรายงานนี้:**")
+                grid_cols = st.columns(3)
                 for idx, img in enumerate(uploaded_files_t1):
-                    with img_cols[idx % 4]:
+                    with grid_cols[idx % 3]:
                         st.image(img, use_container_width=True)
+                        is_selected = st.checkbox(
+                            f"เลือกรูปที่ {idx+1}",
+                            value=True,
+                            key=f"t1_select_img_{idx}"
+                        )
+                        if is_selected:
+                            selected_images_t1.append(img)
 
     with t2_col2:
         with st.container(border=True):
@@ -565,6 +565,14 @@ with tab1:
                 )
 
             st.code(final_text_t2, language="text")
+
+            # แสดงตัวอย่างเฉพาะภาพที่เลือกใช้ส่ง
+            if selected_images_t1:
+                st.markdown(f"🖼️ **ภาพที่เลือกแนบรายงาน ({len(selected_images_t1)} รูป):**")
+                prev_cols = st.columns(min(len(selected_images_t1), 4))
+                for idx, img in enumerate(selected_images_t1):
+                    with prev_cols[idx % 4]:
+                        st.image(img, use_container_width=True)
 
             # --- ปุ่มส่ง LINE OA ยิงตรงเข้ากลุ่ม ---
             if st.button("🚀 ส่งรายงานเข้ากลุ่ม LINE ทันที (LINE OA)", key="btn_send_line_t1"):
@@ -703,20 +711,29 @@ with tab2:
             elif len(valid_tasks) > 1:
                 final_tasks_text = "\n".join([f"- {task}" for task in valid_tasks])
 
-            # --- เพิ่มส่วนอัปโหลดรูปภาพ ---
-            st.markdown("### 🖼️ แนบภาพถ่ายการปฏิบัติงาน ( Tab 2 )")
+            # --- ระบบอัปโหลดและเลือกภาพ (Tab 2) ---
+            st.markdown("### 🖼️ คลังอัปโหลดรูปภาพ")
             uploaded_files_t2 = st.file_uploader(
-                "เลือกรูปภาพภาพการปฏิบัติงาน",
+                "อัปโหลดรูปภาพเก็บเข้าคลัง (อัปได้เรื่อยๆ)",
                 type=["png", "jpg", "jpeg"],
                 accept_multiple_files=True,
-                key="t2_images"
+                key="t2_images_pool"
             )
+
+            selected_images_t2 = []
             if uploaded_files_t2:
-                st.markdown("**ตัวอย่างภาพที่เลือก:**")
-                img_cols = st.columns(min(len(uploaded_files_t2), 3))
+                st.markdown("📌 **ติ๊กเลือกรูปภาพที่ต้องการใช้แนบส่งรายงานนี้:**")
+                grid_cols_t2 = st.columns(3)
                 for idx, img in enumerate(uploaded_files_t2):
-                    with img_cols[idx % 3]:
+                    with grid_cols_t2[idx % 3]:
                         st.image(img, use_container_width=True)
+                        is_selected_t2 = st.checkbox(
+                            f"เลือกรูปที่ {idx+1}",
+                            value=True,
+                            key=f"t2_select_img_{idx}"
+                        )
+                        if is_selected_t2:
+                            selected_images_t2.append(img)
 
     with main_col3:
         with st.container(border=True):
@@ -732,6 +749,14 @@ with tab2:
    จึงเรียนมาเพื่อโปรดทราบ"""
 
             st.code(report_text, language="text")
+
+            # แสดงตัวอย่างเฉพาะภาพที่เลือกใช้ส่ง
+            if selected_images_t2:
+                st.markdown(f"🖼️ **ภาพที่เลือกแนบรายงาน ({len(selected_images_t2)} รูป):**")
+                prev_cols_t2 = st.columns(min(len(selected_images_t2), 4))
+                for idx, img in enumerate(selected_images_t2):
+                    with prev_cols_t2[idx % 4]:
+                        st.image(img, use_container_width=True)
 
             # --- ปุ่มส่ง LINE OA ยิงตรงเข้ากลุ่ม ---
             if st.button("🚀 ส่งรายงานเข้ากลุ่ม LINE ทันที (LINE OA)", key="btn_send_line_t2"):
