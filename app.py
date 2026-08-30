@@ -8,10 +8,12 @@ import json
 # 1. INITIALIZE FIREBASE (ระบบฐานข้อมูล)
 # ==========================================
 if not firebase_admin._apps:
-    # ดึงค่า Config ของ Firebase จาก st.secrets
+    # อ่านค่าแบบ Dict จาก st.secrets
     firebase_dict = dict(st.secrets["firebase"])
-    # แปลง private_key เรื่อง \n ให้ถูกต้อง
-    firebase_dict["private_key"] = firebase_dict["private_key"].replace("\\n", "\n")
+    
+    # แปลง private_key เรื่อง \n และเครื่องหมายคำพูดให้ถูกต้อง
+    if "private_key" in firebase_dict:
+        firebase_dict["private_key"] = firebase_dict["private_key"].replace("\\n", "\n")
     
     cred = credentials.Certificate(firebase_dict)
     firebase_admin.initialize_app(cred)
