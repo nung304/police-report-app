@@ -101,6 +101,7 @@ def upload_files_to_pending(uploaded_files):
 
 def get_images_from_folder(folder_prefix):
     """ดึงรายการรูปภาพจากโฟลเดอร์ที่ระบุ (pending/ หรือ sent/)"""
+    bucket = storage.bucket("police-report-76ece.appspot.com")
     blobs = bucket.list_blobs(prefix=folder_prefix)
     file_list = []
     for blob in blobs:
