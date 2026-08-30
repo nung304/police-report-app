@@ -1,6 +1,8 @@
 from datetime import datetime
 import time
 import urllib.parse
+import firebase_admin
+from firebase_admin import credentials, storage
 from google.cloud import firestore
 from google.oauth2 import service_account
 import requests
@@ -49,23 +51,82 @@ st.html(
 )
 
 
-# --- 3. เชื่อมต่อฐานข้อมูล NoSQL (Firebase Firestore) ---
+# --- 3. เชื่อมต่อฐานข้อมูล Firestore & Firebase Storage ---
 @st.cache_resource
-def get_firestore_client():
+def init_firebase():
     cred_dict = dict(st.secrets["firebase"])
     if "private_key" in cred_dict:
-        cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n").strip()
+        cred_dict["private_key"] = (
+            cred_dict["private_key"].replace("\\n", "\n").strip()
+        )
 
+    # เชื่อมต่อ Firestore Native Client
     creds = service_account.Credentials.from_service_account_info(cred_dict)
-    db = firestore.Client(credentials=creds, project=cred_dict["project_id"])
-    return db
+    db_client = firestore.Client(
+        credentials=creds, project=cred_dict["project_id"]
+    )
+
+    # เชื่อมต่อ Firebase Admin App สำหรับ Storage
+    if not firebase_admin._apps:
+        bucket_name = cred_dict.get(
+            "storage_bucket", f"{cred_dict['project_id']}.appspot.com"
+        )
+        fb_cred = credentials.Certificate(cred_dict)
+        firebase_admin.initialize_app(
+            fb_cred, {"storageBucket": bucket_name}
+        )
+
+    bucket_client = storage.bucket()
+    return db_client, bucket_client
 
 
-db = get_firestore_client()
+db, bucket = init_firebase()
 
 
-# --- 4. ฟังก์ชันส่งข้อความผ่าน LINE Messaging API (LINE OA) ---
-def send_line_oa_push(message_text):
+# --- 4. ฟังก์ชันการจัดการไฟล์บน Firebase Storage (Pending & Sent) ---
+def upload_files_to_pending(uploaded_files):
+    """อัปโหลดรูปภาพใหม่ไปเก็บในโฟลเดอร์ pending/"""
+    count = 0
+    for file in uploaded_files:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        filename = f"pending/{timestamp}_{file.name}"
+        blob = bucket.blob(filename)
+        blob.upload_from_string(
+            file.getvalue(), content_type=file.type or "image/jpeg"
+        )
+        blob.make_public()
+        count += 1
+    return count
+
+
+def get_images_from_folder(folder_prefix):
+    """ดึงรายการรูปภาพจากโฟลเดอร์ที่ระบุ (pending/ หรือ sent/)"""
+    blobs = bucket.list_blobs(prefix=folder_prefix)
+    file_list = []
+    for blob in blobs:
+        if not blob.name.endswith("/"):  # ข้าม Directory marker
+            blob.make_public()
+            file_list.append({
+                "blob_name": blob.name,
+                "file_name": blob.name.replace(folder_prefix, ""),
+                "public_url": blob.public_url,
+            })
+    return file_list
+
+
+def move_pending_to_sent(blob_names):
+    """ย้ายไฟล์ที่ส่งแล้วจาก pending/ ไปยัง sent/ อัตโนมัติ"""
+    for old_blob_name in blob_names:
+        source_blob = bucket.blob(old_blob_name)
+        new_blob_name = old_blob_name.replace("pending/", "sent/")
+        new_blob = bucket.copy_blob(source_blob, bucket, new_blob_name)
+        new_blob.make_public()
+        source_blob.delete()
+
+
+# --- 5. ฟังก์ชันส่งข้อความ + รูปภาพจำนวนมาก (10+ รูป) เข้า LINE OA ---
+def send_line_oa_push_with_images(message_text, selected_image_objs):
+    """ส่งข้อความและรูปภาพเข้า LINE OA โดยจะแบ่งยิงอัตโนมัติหากเกินข้อจำกัด"""
     try:
         line_secrets = st.secrets["line"]
         token = line_secrets["channel_access_token"]
@@ -76,20 +137,63 @@ def send_line_oa_push(message_text):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}",
         }
-        
-        messages = [{"type": "text", "text": message_text}]
 
-        payload = {
-            "to": group_id,
-            "messages": messages,
-        }
-        res = requests.post(url, headers=headers, json=payload, timeout=10)
-        return res.status_code == 200, res.text
+        image_urls = [img["public_url"] for img in selected_image_objs]
+        blob_names_to_move = [
+            img["blob_name"]
+            for img in selected_image_objs
+            if img["blob_name"].startswith("pending/")
+        ]
+
+        # Batch 1: ข้อความสรุปรายงาน + รูปภาพสูงสุด 4 รูปแรก
+        first_batch = [{"type": "text", "text": message_text}]
+        for img_url in image_urls[:4]:
+            first_batch.append({
+                "type": "image",
+                "originalContentUrl": img_url,
+                "previewImageUrl": img_url,
+            })
+
+        res1 = requests.post(
+            url,
+            headers=headers,
+            json={"to": group_id, "messages": first_batch},
+            timeout=20,
+        )
+        if res1.status_code != 200:
+            return False, f"ส่งข้อความหลักไม่สำเร็จ: {res1.text}"
+
+        # Batch ถัดๆ ไป: รูปภาพที่เหลือ (รูปที่ 5 เป็นต้นไป แบ่งชุดละไม่เกิน 5 รูป)
+        remaining_urls = image_urls[4:]
+        if remaining_urls:
+            chunk_size = 5
+            for i in range(0, len(remaining_urls), chunk_size):
+                chunk = remaining_urls[i : i + chunk_size]
+                image_batch = [
+                    {
+                        "type": "image",
+                        "originalContentUrl": u,
+                        "previewImageUrl": u,
+                    }
+                    for u in chunk
+                ]
+                requests.post(
+                    url,
+                    headers=headers,
+                    json={"to": group_id, "messages": image_batch},
+                    timeout=20,
+                )
+
+        # ย้ายรูปที่ส่งสำเร็จแล้วจาก pending/ -> sent/ อัตโนมัติ
+        if blob_names_to_move:
+            move_pending_to_sent(blob_names_to_move)
+
+        return True, "สำเร็จ"
     except Exception as e:
         return False, str(e)
 
 
-# --- 5. ส่วนควบคุม CSS สำหรับจัดแต่งกรอบหน้าตาเว็บ ---
+# --- 6. ส่วนควบคุม CSS สำหรับจัดแต่งกรอบหน้าตาเว็บ ---
 st.markdown(
     """
     <style>
@@ -211,12 +315,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.markdown(
-    '<p class="main-subtitle">งานสอบสวน สภ.ไม้แก่น (ระบบฐานข้อมูล NoSQL Cloud)</p>',
+    '<p class="main-subtitle">งานสอบสวน สภ.ไม้แก่น (ระบบฐานข้อมูล Cloud & Storage)</p>',
     unsafe_allow_html=True,
 )
 
 
-# --- 6. ฟังก์ชัน โหลด/บันทึก และ จัดลำดับยศตำรวจ ---
+# --- 7. โหลดข้อมูลเจ้าหน้าที่และคลังภารกิจ ---
 def get_rank_priority(rank_str):
     ranks_priority = {
         "พล.ต.อ.": 1,
@@ -377,6 +481,9 @@ tab1, tab2 = st.tabs([
     "👮‍♂️ 2. รายงานรูปแบบเดิม (เดี่ยว/พร้อมพวก)",
 ])
 
+# ==========================================
+# TAB 1: รายงานสรุปผลการปฏิบัติประจำวัน
+# ==========================================
 with tab1:
     t2_col1, t2_col2 = st.columns([1.2, 1])
 
@@ -518,35 +625,50 @@ with tab1:
                         report_items_t2.append(item_text)
 
                     st.divider()
-            else:
-                st.info(
-                    "ℹ️ เปิดโหมดรายงานกรณีเหตุการณ์ปกติเรียบร้อยแล้ว"
-                    " ตรวจสอบข้อความสรุปทางด้านขวาได้เลยครับ"
-                )
 
-            # --- ระบบอัปโหลดและเลือกภาพ (Tab 1) ---
-            st.markdown("### 🖼️ คลังอัปโหลดรูปภาพ")
+            # --- ระบบการอัปโหลด & ดึงคลังภาพ Firebase Storage ---
+            st.markdown("### 🖼️ คลังอัปโหลดรูปภาพ (Firebase Storage)")
             uploaded_files_t1 = st.file_uploader(
-                "อัปโหลดรูปภาพเก็บเข้าคลัง (อัปได้เรื่อยๆ)",
+                "อัปโหลดรูปภาพใหม่เข้าโฟลเดอร์ยังไม่เคยส่ง (pending/)",
                 type=["png", "jpg", "jpeg"],
                 accept_multiple_files=True,
-                key="t1_images_pool"
+                key="t1_uploader"
             )
 
-            selected_images_t1 = []
             if uploaded_files_t1:
+                with st.spinner("กำลังอัปโหลดรูปภาพขึ้น Firebase Storage..."):
+                    uploaded_count = upload_files_to_pending(uploaded_files_t1)
+                    st.toast(f"🎉 อัปโหลดสำเร็จ {uploaded_count} รูปภาพเข้าคลัง 'ยังไม่เคยส่ง'", icon="☁️")
+                    time.sleep(1)
+                    st.rerun()
+
+            # สวิตช์เลือกดูโฟลเดอร์ (ยังไม่เคยส่ง / ส่งแล้ว)
+            folder_choice_t1 = st.radio(
+                "📁 เลือกแสดงคลังรูปภาพ:",
+                ["📥 ยังไม่เคยส่ง (pending/)", "📤 ส่งแล้ว (sent/)"],
+                horizontal=True,
+                key="t1_folder_choice"
+            )
+
+            target_prefix_t1 = "pending/" if "ยังไม่เคยส่ง" in folder_choice_t1 else "sent/"
+            images_in_storage_t1 = get_images_from_folder(target_prefix_t1)
+
+            selected_images_t1 = []
+            if images_in_storage_t1:
                 st.markdown("📌 **ติ๊กเลือกรูปภาพที่ต้องการใช้แนบส่งรายงานนี้:**")
                 grid_cols = st.columns(3)
-                for idx, img in enumerate(uploaded_files_t1):
+                for idx, img_obj in enumerate(images_in_storage_t1):
                     with grid_cols[idx % 3]:
-                        st.image(img, use_container_width=True)
+                        st.image(img_obj["public_url"], use_container_width=True)
                         is_selected = st.checkbox(
                             f"เลือกรูปที่ {idx+1}",
-                            value=True,
-                            key=f"t1_select_img_{idx}"
+                            value=("pending/" in target_prefix_t1),
+                            key=f"t1_select_{img_obj['blob_name']}"
                         )
                         if is_selected:
-                            selected_images_t1.append(img)
+                            selected_images_t1.append(img_obj)
+            else:
+                st.info(f"ℹ️ ไม่มีรูปภาพในโฟลเดอร์ {target_prefix_t1}")
 
     with t2_col2:
         with st.container(border=True):
@@ -566,24 +688,31 @@ with tab1:
 
             st.code(final_text_t2, language="text")
 
-            # แสดงตัวอย่างเฉพาะภาพที่เลือกใช้ส่ง
+            # พรีวิวภาพที่เลือกแนบส่ง
             if selected_images_t1:
                 st.markdown(f"🖼️ **ภาพที่เลือกแนบรายงาน ({len(selected_images_t1)} รูป):**")
                 prev_cols = st.columns(min(len(selected_images_t1), 4))
-                for idx, img in enumerate(selected_images_t1):
+                for idx, img_obj in enumerate(selected_images_t1):
                     with prev_cols[idx % 4]:
-                        st.image(img, use_container_width=True)
+                        st.image(img_obj["public_url"], use_container_width=True)
 
-            # --- ปุ่มส่ง LINE OA ยิงตรงเข้ากลุ่ม ---
+            # --- ปุ่มส่ง LINE OA ยิงตรงเข้ากลุ่ม + ย้ายไฟล์อัตโนมัติ ---
             if st.button("🚀 ส่งรายงานเข้ากลุ่ม LINE ทันที (LINE OA)", key="btn_send_line_t1"):
-                with st.spinner("กำลังส่งรายงานเข้ากลุ่ม LINE..."):
-                    success, err_msg = send_line_oa_push(final_text_t2)
+                if not selected_images_t1:
+                    st.warning("⚠️ ไม่ได้เลือกรูปภาพส่ง แต่ระบบจะส่งเฉพาะข้อความเข้ากลุ่ม LINE")
+                
+                with st.spinner("กำลังยิงส่งรายงานและรูปภาพเข้ากลุ่ม LINE..."):
+                    success, err_msg = send_line_oa_push_with_images(
+                        final_text_t2, selected_images_t1
+                    )
                     if success:
-                        st.success("✅ ส่งรายงานเข้ากลุ่ม LINE เรียบร้อยแล้ว!")
+                        st.success("✅ ส่งรายงานพร้อมรูปภาพสำเร็จ! รูปที่ส่งแล้วถูกย้ายไปโฟลเดอร์ sent/ เรียบร้อยแล้ว")
+                        time.sleep(1.5)
+                        st.rerun()
                     else:
                         st.error(f"❌ ส่งข้อความไม่สำเร็จ: {err_msg}")
 
-            # --- ปุ่มแชร์เข้า LINE (LINE Share Target Picker) ---
+            # --- ปุ่มแชร์เข้า LINE (LINE Share) ---
             encoded_t2 = urllib.parse.quote(final_text_t2)
             line_share_url_t2 = f"https://line.me/R/share?text={encoded_t2}"
             st.markdown(
@@ -607,6 +736,9 @@ with tab1:
                 unsafe_allow_html=True,
             )
 
+# ==========================================
+# TAB 2: รายงานรูปแบบเดิม (เดี่ยว/พร้อมพวก)
+# ==========================================
 with tab2:
     main_col1, main_col2, main_col3 = st.columns([1, 1, 1.1])
 
@@ -711,29 +843,48 @@ with tab2:
             elif len(valid_tasks) > 1:
                 final_tasks_text = "\n".join([f"- {task}" for task in valid_tasks])
 
-            # --- ระบบอัปโหลดและเลือกภาพ (Tab 2) ---
-            st.markdown("### 🖼️ คลังอัปโหลดรูปภาพ")
+            # --- ระบบอัปโหลดภาพ & Firebase Storage (Tab 2) ---
+            st.markdown("### 🖼️ คลังอัปโหลดรูปภาพ (Firebase Storage)")
             uploaded_files_t2 = st.file_uploader(
-                "อัปโหลดรูปภาพเก็บเข้าคลัง (อัปได้เรื่อยๆ)",
+                "อัปโหลดรูปภาพใหม่เข้าโฟลเดอร์ยังไม่เคยส่ง (pending/)",
                 type=["png", "jpg", "jpeg"],
                 accept_multiple_files=True,
-                key="t2_images_pool"
+                key="t2_uploader"
             )
 
-            selected_images_t2 = []
             if uploaded_files_t2:
+                with st.spinner("กำลังอัปโหลดรูปภาพขึ้น Firebase Storage..."):
+                    uploaded_count = upload_files_to_pending(uploaded_files_t2)
+                    st.toast(f"🎉 อัปโหลดสำเร็จ {uploaded_count} รูปภาพเข้าคลัง 'ยังไม่เคยส่ง'", icon="☁️")
+                    time.sleep(1)
+                    st.rerun()
+
+            folder_choice_t2 = st.radio(
+                "📁 เลือกแสดงคลังรูปภาพ:",
+                ["📥 ยังไม่เคยส่ง (pending/)", "📤 ส่งแล้ว (sent/)"],
+                horizontal=True,
+                key="t2_folder_choice"
+            )
+
+            target_prefix_t2 = "pending/" if "ยังไม่เคยส่ง" in folder_choice_t2 else "sent/"
+            images_in_storage_t2 = get_images_from_folder(target_prefix_t2)
+
+            selected_images_t2 = []
+            if images_in_storage_t2:
                 st.markdown("📌 **ติ๊กเลือกรูปภาพที่ต้องการใช้แนบส่งรายงานนี้:**")
                 grid_cols_t2 = st.columns(3)
-                for idx, img in enumerate(uploaded_files_t2):
+                for idx, img_obj in enumerate(images_in_storage_t2):
                     with grid_cols_t2[idx % 3]:
-                        st.image(img, use_container_width=True)
+                        st.image(img_obj["public_url"], use_container_width=True)
                         is_selected_t2 = st.checkbox(
                             f"เลือกรูปที่ {idx+1}",
-                            value=True,
-                            key=f"t2_select_img_{idx}"
+                            value=("pending/" in target_prefix_t2),
+                            key=f"t2_select_{img_obj['blob_name']}"
                         )
                         if is_selected_t2:
-                            selected_images_t2.append(img)
+                            selected_images_t2.append(img_obj)
+            else:
+                st.info(f"ℹ️ ไม่มีรูปภาพในโฟลเดอร์ {target_prefix_t2}")
 
     with main_col3:
         with st.container(border=True):
@@ -750,24 +901,31 @@ with tab2:
 
             st.code(report_text, language="text")
 
-            # แสดงตัวอย่างเฉพาะภาพที่เลือกใช้ส่ง
+            # พรีวิวภาพที่เลือกแนบส่ง
             if selected_images_t2:
                 st.markdown(f"🖼️ **ภาพที่เลือกแนบรายงาน ({len(selected_images_t2)} รูป):**")
                 prev_cols_t2 = st.columns(min(len(selected_images_t2), 4))
-                for idx, img in enumerate(selected_images_t2):
+                for idx, img_obj in enumerate(selected_images_t2):
                     with prev_cols_t2[idx % 4]:
-                        st.image(img, use_container_width=True)
+                        st.image(img_obj["public_url"], use_container_width=True)
 
-            # --- ปุ่มส่ง LINE OA ยิงตรงเข้ากลุ่ม ---
+            # --- ปุ่มส่ง LINE OA ยิงตรงเข้ากลุ่ม + ย้ายไฟล์อัตโนมัติ ---
             if st.button("🚀 ส่งรายงานเข้ากลุ่ม LINE ทันที (LINE OA)", key="btn_send_line_t2"):
-                with st.spinner("กำลังส่งรายงานเข้ากลุ่ม LINE..."):
-                    success, err_msg = send_line_oa_push(report_text)
+                if not selected_images_t2:
+                    st.warning("⚠️ ไม่ได้เลือกรูปภาพส่ง แต่ระบบจะส่งเฉพาะข้อความเข้ากลุ่ม LINE")
+
+                with st.spinner("กำลังยิงส่งรายงานและรูปภาพเข้ากลุ่ม LINE..."):
+                    success, err_msg = send_line_oa_push_with_images(
+                        report_text, selected_images_t2
+                    )
                     if success:
-                        st.success("✅ ส่งรายงานเข้ากลุ่ม LINE เรียบร้อยแล้ว!")
+                        st.success("✅ ส่งรายงานพร้อมรูปภาพสำเร็จ! รูปที่ส่งแล้วถูกย้ายไปโฟลเดอร์ sent/ เรียบร้อยแล้ว")
+                        time.sleep(1.5)
+                        st.rerun()
                     else:
                         st.error(f"❌ ส่งข้อความไม่สำเร็จ: {err_msg}")
 
-            # --- ปุ่มแชร์เข้า LINE (LINE Share Target Picker) ---
+            # --- ปุ่มแชร์เข้า LINE (LINE Share) ---
             encoded_t1 = urllib.parse.quote(report_text)
             line_share_url_t1 = f"https://line.me/R/share?text={encoded_t1}"
             st.markdown(
@@ -791,6 +949,9 @@ with tab2:
                 unsafe_allow_html=True,
             )
 
+# ==========================================
+# ⚙️ ตั้งค่าระบบหลังบ้าน (จัดการรายชื่อ / จัดการคลังภารกิจ)
+# ==========================================
 st.markdown("---")
 with st.expander(
     "⚙️ ตั้งค่าระบบหลังบ้าน (จัดการรายชื่อ / จัดการคลังภารกิจ)", expanded=False
