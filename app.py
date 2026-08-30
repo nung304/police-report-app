@@ -8,15 +8,18 @@ import json
 # 1. INITIALIZE FIREBASE (ระบบฐานข้อมูล)
 # ==========================================
 if not firebase_admin._apps:
-    # อ่านค่าแบบ Dict จาก st.secrets
-    firebase_dict = dict(st.secrets["firebase"])
-    
-    # แปลง private_key เรื่อง \n และเครื่องหมายคำพูดให้ถูกต้อง
-    if "private_key" in firebase_dict:
-        firebase_dict["private_key"] = firebase_dict["private_key"].replace("\\n", "\n")
-    
-    cred = credentials.Certificate(firebase_dict)
-    firebase_admin.initialize_app(cred)
+    try:
+        # แปลง st.secrets["firebase"] ให้เป็น Pure Dict เพื่อป้องกันปัญหา Certificate Error
+        firebase_dict = json.loads(json.dumps(dict(st.secrets["firebase"])))
+        
+        # จัดการเรื่อง \n ใน private_key ให้ถูกต้อง
+        if "private_key" in firebase_dict:
+            firebase_dict["private_key"] = firebase_dict["private_key"].replace("\\n", "\n")
+        
+        cred = credentials.Certificate(firebase_dict)
+        firebase_admin.initialize_app(cred)
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดในการเชื่อมต่อ Firebase: {e}")
 
 db = firestore.client()
 
@@ -65,7 +68,7 @@ st.caption("สภ.ไม้แก่น จว.ปัตตานี")
 st.markdown("---")
 
 # --- ส่วนที่ 1: ฟอร์มกรอกข้อมูลรายงาน ---
-st.subheader("📝 กรอก รายละเอียดรายงาน")
+st.subheader("📝 กรอกรายละเอียดรายงาน")
 
 case_number = st.text_input("เลขคดี / ปจว. ข้อที่", placeholder="เช่น คดีอาญาที่ 12/2569")
 investigator_name = st.text_input("พนักงานสอบสวนผู้รับผิดชอบ", placeholder="เช่น พ.ต.ต. สมชาย ใจดี")
@@ -75,12 +78,11 @@ case_detail = st.text_area("รายละเอียดการดำเน�
 if case_number and case_detail:
     # จัดรูปแบบข้อความที่จะส่งลงกลุ่ม LINE
     report_text = (
-        f"📢 **รายงานผลการปฏิบัติงานสอบสวน**\n"
+        f"📢 รายงานผลการปฏิบัติงานสอบสวน\n"
         f"หน่วย: สภ.ไม้แก่น\n\n"
-        f"📌 **เลขคดี:** {case_number}\n"
-        f"👮‍♂️ **พนักงานสอบสวน:** {investigator_name}\n"
-        f"📝 **รายละเอียด:**\n{case_detail}\n\n"
-        f"⏱️ บันทึกเมื่อ: {st.session_state.get('current_time', 'ปัจจุบัน')}"
+        f"📌 เลขคดี: {case_number}\n"
+        f"👮‍♂️ พนักงานสอบสวน: {investigator_name}\n"
+        f"📝 รายละเอียด:\n{case_detail}"
     )
 
     st.markdown("---")
