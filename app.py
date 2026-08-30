@@ -1,6 +1,6 @@
-from datetime import datetime
 import io
 import time
+from datetime import datetime
 import urllib.parse
 from google.cloud import firestore
 from google.oauth2 import service_account
@@ -66,16 +66,17 @@ def get_credentials():
         ],
     )
 
-
-creds = get_credentials()
-db = firestore.Client(credentials=creds, project=creds.project_id)
-
+@st.cache_resource
+def get_firestore_db():
+    creds = get_credentials()
+    return firestore.Client(credentials=creds, project=creds.project_id)
 
 @st.cache_resource
 def get_drive_service():
+    creds = get_credentials()
     return build("drive", "v3", credentials=creds)
 
-
+db = get_firestore_db()
 drive_service = get_drive_service()
 
 
@@ -94,7 +95,7 @@ def upload_image_to_gdrive(file_obj, filename, mime_type):
     )
     file_id = file.get("id")
 
-    # ปรับสิทธิ์ไฟล์ให้เข้าถึงได้ผ่าน URL สาธารณะ (จำเป็นสำหรับ LINE)
+    # ปรับสิทธิ์ไฟล์ให้เข้าถึงได้ผ่าน URL สาธารณะ
     permission = {"type": "anyone", "role": "reader"}
     drive_service.permissions().create(
         fileId=file_id, body=permission
@@ -108,7 +109,7 @@ def upload_image_to_gdrive(file_obj, filename, mime_type):
         "file_id": file_id,
         "filename": filename,
         "image_url": image_url,
-        "status": "pending",  # 'pending' = ยังไม่ได้ส่ง, 'sent' = ส่งแล้ว
+        "status": "pending",
         "created_at": datetime.now(),
     })
 
@@ -153,7 +154,6 @@ def send_line_oa_push_with_images(message_text, image_urls=None):
 
         messages = [{"type": "text", "text": message_text}]
 
-        # เพิ่มข้อความประเภทรูปภาพ (ส่งตามหลังข้อความรายงาน สูงสุดครั้งละ 4 ภาพ)
         if image_urls:
             for img_url in image_urls[:4]:
                 messages.append({
@@ -272,7 +272,7 @@ st.markdown(
 )
 
 
-# --- 7. โหลดข้อมูลตำรวจและภารกิจ (เพิ่ม Cache ป้องกันหน้าจอโหลดค้าง) ---
+# --- 7. โหลดข้อมูลตำรวจและภารกิจ ---
 def get_rank_priority(rank_str):
     ranks_priority = {
         "พล.ต.อ.": 1,
@@ -293,9 +293,10 @@ def get_rank_priority(rank_str):
     return ranks_priority.get(rank_str.strip(), 99)
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def load_personnel():
-    docs = db.collection("personnel").stream()
+    client = get_firestore_db()
+    docs = client.collection("personnel").stream()
     personnel = []
     for doc in docs:
         p_data = doc.to_dict()
@@ -340,9 +341,9 @@ def load_personnel():
                 "position": "ผบ.หมู่(นปพ.) สภ.ไม้แก่น ปฏิบัติหน้าที่ งานสอบสวน",
             },
         ]
-        batch = db.batch()
+        batch = client.batch()
         for p in default_p:
-            doc_ref = db.collection("personnel").document()
+            doc_ref = client.collection("personnel").document()
             batch.set(doc_ref, p)
             p["id"] = doc_ref.id
             personnel.append(p)
@@ -352,9 +353,10 @@ def load_personnel():
     return personnel
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def load_tasks():
-    docs = db.collection("tasks").stream()
+    client = get_firestore_db()
+    docs = client.collection("tasks").stream()
     tasks = []
     for doc in docs:
         t_data = doc.to_dict()
@@ -378,9 +380,9 @@ def load_tasks():
                 " กลุ่มงานตรวจพิสูจน์ยาเสพติด พิสูจน์หลักฐานจังหวัดปัตตานี"
             ),
         ]
-        batch = db.batch()
+        batch = client.batch()
         for t in default_tasks:
-            doc_ref = db.collection("tasks").document()
+            doc_ref = client.collection("tasks").document()
             batch.set(doc_ref, {"task_detail": t})
             tasks.append({"id": doc_ref.id, "task_detail": t})
         batch.commit()
@@ -457,7 +459,6 @@ with st.expander("📤 อัปโหลดภาพใหม่เข้าส
         else:
             st.warning("⚠️ กรุณาเลือกไฟล์ภาพก่อนกดอัปโหลด")
 
-# ตัวเลือกโฟลเดอร์สำหรับคัดเลือกภาพ
 folder_choice = st.radio(
     "📁 เลือกหมวดหมู่คลังภาพประกอบ:",
     ["📂 ภาพที่ยังไม่ได้ส่งรายงาน (Pending)", "📂 ภาพที่ส่งรายงานแล้ว (Sent)"],
@@ -635,7 +636,6 @@ with tab1:
                     f"📸 มีภาพแนบพร้อมส่งจำนวน {len(selected_image_urls)} ภาพ"
                 )
 
-            # --- ปุ่มส่ง LINE OA ยิงตรงเข้ากลุ่มพร้อมรูปภาพ ---
             if st.button(
                 "🚀 ส่งรายงาน + ภาพแนบเข้ากลุ่ม LINE ทันที (LINE OA)",
                 key="btn_send_line_t1",
@@ -764,7 +764,6 @@ with tab2:
                     f"📸 มีภาพแนบพร้อมส่งจำนวน {len(selected_image_urls)} ภาพ"
                 )
 
-            # --- ปุ่มส่ง LINE OA ยิงตรงเข้ากลุ่มพร้อมรูปภาพ ---
             if st.button(
                 "🚀 ส่งรายงาน + ภาพแนบเข้ากลุ่ม LINE ทันที (LINE OA)",
                 key="btn_send_line_t2",
