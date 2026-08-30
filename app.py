@@ -1,8 +1,11 @@
 from datetime import datetime
+import io
 import time
 import urllib.parse
 from google.cloud import firestore
 from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
 import requests
 import streamlit as st
 
@@ -49,23 +52,94 @@ st.html(
 )
 
 
-# --- 3. เชื่อมต่อฐานข้อมูล NoSQL (Firebase Firestore) ---
+# --- 3. เชื่อมต่อ Firebase Firestore & Google Drive API ---
 @st.cache_resource
-def get_firestore_client():
+def get_credentials():
     cred_dict = dict(st.secrets["firebase"])
     if "private_key" in cred_dict:
         cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n").strip()
+    return service_account.Credentials.from_service_account_info(
+        cred_dict,
+        scopes=[
+            "https://www.googleapis.com/auth/firestore",
+            "https://www.googleapis.com/auth/drive.file",
+        ],
+    )
 
-    creds = service_account.Credentials.from_service_account_info(cred_dict)
-    db = firestore.Client(credentials=creds, project=cred_dict["project_id"])
-    return db
+
+creds = get_credentials()
+db = firestore.Client(credentials=creds, project=creds.project_id)
 
 
-db = get_firestore_client()
+@st.cache_resource
+def get_drive_service():
+    return build("drive", "v3", credentials=creds)
 
 
-# --- 4. ฟังก์ชันส่งข้อความผ่าน LINE Messaging API (LINE OA) ---
-def send_line_oa_push(message_text):
+drive_service = get_drive_service()
+
+
+# --- 4. ฟังก์ชันจัดการไฟล์ภาพใน Google Drive & Firebase ---
+def upload_image_to_gdrive(file_obj, filename, mime_type):
+    folder_id = st.secrets["gdrive"]["folder_id"]
+    file_metadata = {"name": filename, "parents": [folder_id]}
+    media = MediaIoBaseUpload(
+        io.BytesIO(file_obj.getvalue()), mimetype=mime_type, resumable=True
+    )
+
+    file = (
+        drive_service.files()
+        .create(body=file_metadata, media_body=media, fields="id")
+        .execute()
+    )
+    file_id = file.get("id")
+
+    # ปรับสิทธิ์ไฟล์ให้เข้าถึงได้ผ่าน URL สาธารณะ (จำเป็นสำหรับ LINE)
+    permission = {"type": "anyone", "role": "reader"}
+    drive_service.permissions().create(
+        fileId=file_id, body=permission
+    ).execute()
+
+    # URL ภาพสำหรับนำไปยิงเข้า LINE OA
+    image_url = f"https://lh3.googleusercontent.com/d/{file_id}"
+
+    # บันทึกข้อมูลลง Firestore
+    doc_ref = db.collection("report_images").add({
+        "file_id": file_id,
+        "filename": filename,
+        "image_url": image_url,
+        "status": "pending",  # 'pending' = ยังไม่ได้ส่ง, 'sent' = ส่งแล้ว
+        "created_at": datetime.now(),
+    })
+
+    return image_url
+
+
+def fetch_images_by_status(status_type):
+    docs = (
+        db.collection("report_images")
+        .where("status", "==", status_type)
+        .order_by("created_at", direction=firestore.Query.DESCENDING)
+        .stream()
+    )
+    images = []
+    for doc in docs:
+        d = doc.to_dict()
+        d["doc_id"] = doc.id
+        images.append(d)
+    return images
+
+
+def mark_images_as_sent(image_doc_ids):
+    for doc_id in image_doc_ids:
+        db.collection("report_images").document(doc_id).update({
+            "status": "sent",
+            "sent_at": datetime.now(),
+        })
+
+
+# --- 5. ฟังก์ชันส่งข้อความและภาพผ่าน LINE Messaging API ---
+def send_line_oa_push_with_images(message_text, image_urls=None):
     try:
         line_secrets = st.secrets["line"]
         token = line_secrets["channel_access_token"]
@@ -76,17 +150,26 @@ def send_line_oa_push(message_text):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}",
         }
-        payload = {
-            "to": group_id,
-            "messages": [{"type": "text", "text": message_text}],
-        }
-        res = requests.post(url, headers=headers, json=payload, timeout=10)
+
+        messages = [{"type": "text", "text": message_text}]
+
+        # เพิ่มข้อความประเภทรูปภาพ (ส่งตามหลังข้อความรายงาน สูงสุดครั้งละ 4 ภาพ)
+        if image_urls:
+            for img_url in image_urls[:4]:
+                messages.append({
+                    "type": "image",
+                    "originalContentUrl": img_url,
+                    "previewImageUrl": img_url,
+                })
+
+        payload = {"to": group_id, "messages": messages}
+        res = requests.post(url, headers=headers, json=payload, timeout=15)
         return res.status_code == 200, res.text
     except Exception as e:
         return False, str(e)
 
 
-# --- 5. ส่วนควบคุม CSS สำหรับจัดแต่งกรอบหน้าตาเว็บ ---
+# --- 6. ส่วนควบคุม CSS สำหรับจัดแต่งกรอบหน้าตาเว็บ ---
 st.markdown(
     """
     <style>
@@ -98,7 +181,6 @@ st.markdown(
             padding: 24px !important;
             margin-bottom: 20px !important;
         }
-        
         @media (prefers-color-scheme: dark) {
             .stColumn > div[data-testid="stVerticalBlockBorderWrapper"] {
                 background-color: #1e293b !important;
@@ -106,14 +188,12 @@ st.markdown(
                 box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
             }
         }
-        
         div[data-testid="stVerticalBlock"] div[data-testid="stVerticalBlockBorderWrapper"] {
             background-color: transparent !important;
             border: none !important;
             box-shadow: none !important;
             padding: 0px !important;
         }
-        
         h3 {
             color: #0c2340 !important;
             border-left: 6px solid #0c2340;
@@ -128,7 +208,6 @@ st.markdown(
                 border-left: 6px solid #38bdf8;
             }
         }
-        
         div[data-testid="stCodeBlock"] {
             border: 2px solid #0c2340;
             background-color: #f8fafc !important;
@@ -140,7 +219,6 @@ st.markdown(
                 background-color: #0f172a !important;
             }
         }
-        
         .stButton>button {
             width: 100%;
             border-radius: 10px;
@@ -163,25 +241,6 @@ st.markdown(
                 background-color: #7dd3fc !important;
             }
         }
-        
-        .inline-save-btn button {
-            background-color: #28a745 !important;
-            height: 2.5em !important;
-            margin-top: 5px !important;
-        }
-        .inline-save-btn button:hover {
-            background-color: #218838 !important;
-        }
-        @media (prefers-color-scheme: dark) {
-            .inline-save-btn button {
-                background-color: #34d399 !important;
-                color: #0f172a !important;
-            }
-            .inline-save-btn button:hover {
-                background-color: #059669 !important;
-            }
-        }
-
         .main-title {
             text-align: center; 
             color: #0c2340; 
@@ -208,12 +267,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.markdown(
-    '<p class="main-subtitle">งานสอบสวน สภ.ไม้แก่น (ระบบฐานข้อมูล NoSQL Cloud)</p>',
+    '<p class="main-subtitle">งานสอบสวน สภ.ไม้แก่น (ระบบคลังภาพ Google Drive + NoSQL Cloud)</p>',
     unsafe_allow_html=True,
 )
 
 
-# --- 6. ฟังก์ชัน โหลด/บันทึก และ จัดลำดับยศตำรวจ ---
+# --- 7. โหลดข้อมูลตำรวจและภารกิจ ---
 def get_rank_priority(rank_str):
     ranks_priority = {
         "พล.ต.อ.": 1,
@@ -369,6 +428,72 @@ date_str = f"{date_input.day} {months_th[date_input.month-1]}{year_th}"
 
 st.markdown("---")
 
+# --- 8. ส่วนอัปโหลดและเลือกภาพประกอบการรายงาน ---
+st.markdown("### 🖼️ ระบบจัดการภาพประกอบรายงาน (Google Drive)")
+with st.expander("📤 อัปโหลดภาพใหม่เข้าสู่ Google Drive", expanded=False):
+    uploaded_files = st.file_uploader(
+        "เลือกรูปภาพประกอบภารกิจ (อัปโหลดได้หลายภาพ)",
+        type=["jpg", "jpeg", "png"],
+        accept_multiple_files=True,
+        key="main_file_uploader",
+    )
+    if st.button("☁️ อัปโหลดภาพไปยัง Google Drive", key="btn_upload_gdrive"):
+        if uploaded_files:
+            with st.spinner("กำลังอัปโหลดและปรับสิทธิ์ภาพบน Google Drive..."):
+                for u_file in uploaded_files:
+                    upload_image_to_gdrive(u_file, u_file.name, u_file.type)
+                st.toast("🎉 อัปโหลดภาพเข้า Google Drive สำเร็จ!", icon="✅")
+                time.sleep(1)
+                st.rerun()
+        else:
+            st.warning("⚠️ กรุณาเลือกไฟล์ภาพก่อนกดอัปโหลด")
+
+# ตัวเลือกโฟลเดอร์สำหรับคัดเลือกภาพ
+folder_choice = st.radio(
+    "📁 เลือกหมวดหมู่คลังภาพประกอบ:",
+    ["📂 ภาพที่ยังไม่ได้ส่งรายงาน (Pending)", "📂 ภาพที่ส่งรายงานแล้ว (Sent)"],
+    horizontal=True,
+    key="folder_choice_radio",
+)
+
+target_status = (
+    "pending"
+    if "ยังไม่ได้ส่งรายงาน" in folder_choice
+    else "sent"
+)
+available_images = fetch_images_by_status(target_status)
+
+selected_image_urls = []
+selected_image_doc_ids = []
+
+if available_images:
+    st.markdown(
+        f"**พบภาพทั้งหมด {len(available_images)} ภาพ ในหมวดหมู่ "
+        f"{'ยังไม่ได้ส่ง' if target_status == 'pending' else 'ส่งแล้ว'}**"
+    )
+    img_cols = st.columns(4)
+    for idx, img_obj in enumerate(available_images):
+        col = img_cols[idx % 4]
+        with col:
+            st.image(
+                img_obj["image_url"],
+                use_container_width=True,
+                caption=img_obj["filename"],
+            )
+            is_check = st.checkbox(
+                f"เลือกภาพนี้ #{idx+1}", key=f"chk_img_{img_obj['doc_id']}"
+            )
+            if is_check:
+                selected_image_urls.append(img_obj["image_url"])
+                selected_image_doc_ids.append(img_obj["doc_id"])
+else:
+    st.info(
+        f"ℹ️ ไม่มีภาพในหมวดหมู่ {'ยังไม่ได้ส่งรายงาน' if target_status == 'pending' else 'ส่งรายงานแล้ว'}"
+    )
+
+st.markdown("---")
+
+# --- 9. แท็บสร้างรายงาน ---
 tab1, tab2 = st.tabs([
     "📝 1. รายงานสรุปผลการปฏิบัติประจำวัน (แยกคน/เวลา/ภารกิจ)",
     "👮‍♂️ 2. รายงานรูปแบบเดิม (เดี่ยว/พร้อมพวก)",
@@ -463,49 +588,11 @@ with tab1:
                         key=f"t2_time_{i}",
                     )
 
-                    st.markdown(
-                        "🔍 **ค้นหาภารกิจจากคลัง หรือพิมพ์เรื่องใหม่ลงไปได้เลย**"
-                    )
-
                     task_detail_t2 = st.selectbox(
                         f"พิมพ์ค้นหา หรือเลือกภารกิจที่ {i+1}",
                         options=[""] + raw_tasks_list,
                         key=f"t2_mixed_select_{i}",
                     )
-
-                    is_custom = st.checkbox(
-                        "✍️ พิมพ์เรื่องใหม่ (กรณีไม่มีในตัวเลือกด้านบน)",
-                        value=False,
-                        key=f"t2_custom_check_{i}",
-                    )
-
-                    if is_custom:
-                        task_detail_t2 = st.text_input(
-                            f"✏️ พิมพ์รายละเอียดภารกิจใหม่ที่ {i+1}",
-                            value="",
-                            key=f"t2_custom_write_{i}",
-                        )
-
-                        if task_detail_t2.strip():
-                            st.markdown(
-                                '<div class="inline-save-btn">', unsafe_allow_html=True
-                            )
-                            if st.button(
-                                "💾 บันทึกภารกิจนี้เข้าคลังถาวร", key=f"inline_save_btn_{i}"
-                            ):
-                                new_text = task_detail_t2.strip()
-                                if new_text not in raw_tasks_list:
-                                    db.collection("tasks").add({"task_detail": new_text})
-                                    st.toast(
-                                        "🎉 บันทึกภารกิจเรื่องใหม่เข้าคลังสำเร็จ!", icon="💾"
-                                    )
-                                    time.sleep(1)
-                                    st.rerun()
-                                else:
-                                    st.warning(
-                                        "⚠️ ภารกิจนี้มีอยู่ในระบบคลังเดิมอยู่แล้ว"
-                                    )
-                            st.markdown("</div>", unsafe_allow_html=True)
 
                     if task_detail_t2:
                         item_text = (
@@ -515,11 +602,6 @@ with tab1:
                         report_items_t2.append(item_text)
 
                     st.divider()
-            else:
-                st.info(
-                    "ℹ️ เปิดโหมดรายงานกรณีเหตุการณ์ปกติเรียบร้อยแล้ว"
-                    " ตรวจสอบข้อความสรุปทางด้านขวาได้เลยครับ"
-                )
 
     with t2_col2:
         with st.container(border=True):
@@ -539,38 +621,31 @@ with tab1:
 
             st.code(final_text_t2, language="text")
 
-            # --- ปุ่มส่ง LINE OA ยิงตรงเข้ากลุ่ม ---
-            if st.button("🚀 ส่งรายงานเข้ากลุ่ม LINE ทันที (LINE OA)", key="btn_send_line_t1"):
-                with st.spinner("กำลังส่งรายงานเข้ากลุ่ม LINE..."):
-                    success, err_msg = send_line_oa_push(final_text_t2)
+            if selected_image_urls:
+                st.info(
+                    f"📸 มีภาพแนบพร้อมส่งจำนวน {len(selected_image_urls)} ภาพ"
+                )
+
+            # --- ปุ่มส่ง LINE OA ยิงตรงเข้ากลุ่มพร้อมรูปภาพ ---
+            if st.button(
+                "🚀 ส่งรายงาน + ภาพแนบเข้ากลุ่ม LINE ทันที (LINE OA)",
+                key="btn_send_line_t1",
+            ):
+                with st.spinner("กำลังส่งรายงานและรูปภาพเข้ากลุ่ม LINE..."):
+                    success, err_msg = send_line_oa_push_with_images(
+                        final_text_t2, selected_image_urls
+                    )
                     if success:
-                        st.success("✅ ส่งรายงานเข้ากลุ่ม LINE เรียบร้อยแล้ว!")
+                        if selected_image_doc_ids:
+                            mark_images_as_sent(selected_image_doc_ids)
+                        st.success(
+                            "✅ ส่งรายงานและภาพเข้ากลุ่ม LINE"
+                            " เรียบร้อยแล้ว! (ย้ายสถานะภาพเป็นส่งแล้ว)"
+                        )
+                        time.sleep(1)
+                        st.rerun()
                     else:
                         st.error(f"❌ ส่งข้อความไม่สำเร็จ: {err_msg}")
-
-            # --- ปุ่มแชร์เข้า LINE (LINE Share Target Picker) ---
-            encoded_t2 = urllib.parse.quote(final_text_t2)
-            line_share_url_t2 = f"https://line.me/R/share?text={encoded_t2}"
-            st.markdown(
-                f"""
-                <a href="{line_share_url_t2}" target="_blank" style="text-decoration: none;">
-                    <div style="
-                        background-color: #06C755;
-                        color: white;
-                        text-align: center;
-                        padding: 10px;
-                        border-radius: 10px;
-                        font-weight: bold;
-                        font-size: 15px;
-                        margin-top: 8px;
-                        margin-bottom: 8px;
-                        cursor: pointer;">
-                        🟢 เลือกแชท/กลุ่มเพื่อส่งรายงาน (LINE Share)
-                    </div>
-                </a>
-                """,
-                unsafe_allow_html=True,
-            )
 
 with tab2:
     main_col1, main_col2, main_col3 = st.columns([1, 1, 1.1])
@@ -652,22 +727,6 @@ with tab2:
                         processed_task = processed_task.replace("ได้นำ", "นำ", 1)
                     all_task_details.append(processed_task)
 
-            with st.expander("➕ เพิ่มภารกิจใหม่บันทึกเข้าฐานข้อมูล"):
-                new_detail = st.text_area(
-                    "พิมพ์รายละเอียดภารกิจใหม่ที่นี่", key="t1_new_detail"
-                )
-                if st.button("💾 บันทึกภารกิจถาวร", key="t1_save_task"):
-                    if new_detail:
-                        if new_detail not in raw_tasks_list:
-                            db.collection("tasks").add({"task_detail": new_detail})
-                            st.toast("🎉 เพิ่มภารกิจใหม่สำเร็จ!", icon="💾")
-                            time.sleep(1)
-                            st.rerun()
-                        else:
-                            st.error("❌ มีภารกิจนี้ในคลังแล้ว")
-                    else:
-                        st.warning("⚠️ กรุณากรอกข้อความ")
-
             final_tasks_text = ""
             valid_tasks = [task for task in all_task_details if task]
 
@@ -691,123 +750,28 @@ with tab2:
 
             st.code(report_text, language="text")
 
-            # --- ปุ่มส่ง LINE OA ยิงตรงเข้ากลุ่ม ---
-            if st.button("🚀 ส่งรายงานเข้ากลุ่ม LINE ทันที (LINE OA)", key="btn_send_line_t2"):
-                with st.spinner("กำลังส่งรายงานเข้ากลุ่ม LINE..."):
-                    success, err_msg = send_line_oa_push(report_text)
+            if selected_image_urls:
+                st.info(
+                    f"📸 มีภาพแนบพร้อมส่งจำนวน {len(selected_image_urls)} ภาพ"
+                )
+
+            # --- ปุ่มส่ง LINE OA ยิงตรงเข้ากลุ่มพร้อมรูปภาพ ---
+            if st.button(
+                "🚀 ส่งรายงาน + ภาพแนบเข้ากลุ่ม LINE ทันที (LINE OA)",
+                key="btn_send_line_t2",
+            ):
+                with st.spinner("กำลังส่งรายงานและรูปภาพเข้ากลุ่ม LINE..."):
+                    success, err_msg = send_line_oa_push_with_images(
+                        report_text, selected_image_urls
+                    )
                     if success:
-                        st.success("✅ ส่งรายงานเข้ากลุ่ม LINE เรียบร้อยแล้ว!")
+                        if selected_image_doc_ids:
+                            mark_images_as_sent(selected_image_doc_ids)
+                        st.success(
+                            "✅ ส่งรายงานและภาพเข้ากลุ่ม LINE"
+                            " เรียบร้อยแล้ว! (ย้ายสถานะภาพเป็นส่งแล้ว)"
+                        )
+                        time.sleep(1)
+                        st.rerun()
                     else:
                         st.error(f"❌ ส่งข้อความไม่สำเร็จ: {err_msg}")
-
-            # --- ปุ่มแชร์เข้า LINE (LINE Share Target Picker) ---
-            encoded_t1 = urllib.parse.quote(report_text)
-            line_share_url_t1 = f"https://line.me/R/share?text={encoded_t1}"
-            st.markdown(
-                f"""
-                <a href="{line_share_url_t1}" target="_blank" style="text-decoration: none;">
-                    <div style="
-                        background-color: #06C755;
-                        color: white;
-                        text-align: center;
-                        padding: 10px;
-                        border-radius: 10px;
-                        font-weight: bold;
-                        font-size: 15px;
-                        margin-top: 8px;
-                        margin-bottom: 8px;
-                        cursor: pointer;">
-                        🟢 เลือกแชท/กลุ่มเพื่อส่งรายงาน (LINE Share)
-                    </div>
-                </a>
-                """,
-                unsafe_allow_html=True,
-            )
-
-st.markdown("---")
-with st.expander(
-    "⚙️ ตั้งค่าระบบหลังบ้าน (จัดการรายชื่อ / จัดการคลังภารกิจ)", expanded=False
-):
-
-    st.markdown("#### 👤 1. จัดการรายชื่อเจ้าหน้าที่")
-    with st.form("new_officer_form", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        n_rank = c1.text_input("ยศ (เช่น พ.ต.ท., ร.ต.อ.)")
-        n_name = c2.text_input("ชื่อ-นามสกุล")
-        n_pos = st.text_input("ตำแหน่ง")
-        if st.form_submit_button("💾 บันทึกรายชื่อ") and n_rank and n_name and n_pos:
-            db.collection("personnel").add(
-                {"rank": n_rank, "name": n_name, "position": n_pos}
-            )
-            st.rerun()
-
-    for person in personnel_list:
-        p_col1, p_col2, p_col3 = st.columns([6, 2, 2])
-        p_col1.write(f"**{person['rank']}{person['name']}** - {person['position']}")
-
-        if p_col2.button("✏️ แก้ไข", key=f"edit_p_{person['id']}"):
-            st.session_state[f"editing_p_{person['id']}"] = True
-
-        if p_col3.button("🗑️ ลบ", key=f"del_p_{person['id']}"):
-            db.collection("personnel").document(person["id"]).delete()
-            st.toast("🗑️ ลบรายชื่อเจ้าหน้าที่สำเร็จ!", icon="✅")
-            time.sleep(1)
-            st.rerun()
-
-        if st.session_state.get(f"editing_p_{person['id']}", False):
-            with st.container():
-                ep_rank = st.text_input(
-                    "แก้ไขยศ", value=person["rank"], key=f"ep_rank_{person['id']}"
-                )
-                ep_name = st.text_input(
-                    "แก้ไขชื่อ-นามสกุล",
-                    value=person["name"],
-                    key=f"ep_name_{person['id']}",
-                )
-                ep_pos = st.text_input(
-                    "แก้ไขตำแหน่ง",
-                    value=person["position"],
-                    key=f"ep_pos_{person['id']}",
-                )
-
-                if st.button("💾 อัปเดตรายชื่อ", key=f"save_p_{person['id']}"):
-                    db.collection("personnel").document(person["id"]).update({
-                        "rank": ep_rank,
-                        "name": ep_name,
-                        "position": ep_pos,
-                    })
-                    st.session_state[f"editing_p_{person['id']}"] = False
-                    st.toast("📝 แก้ไขรายชื่อเจ้าหน้าที่สำเร็จ!", icon="🎉")
-                    time.sleep(1)
-                    st.rerun()
-
-    st.markdown("---")
-    st.markdown("#### 📝 2. จัดการคลังข้อความภารกิจ")
-    for t_idx, t_obj in enumerate(tasks_data):
-        t_col1, t_col2, t_col3 = st.columns([6, 2, 2])
-        t_col1.write(f"**{t_idx+1}.** {t_obj['task_detail']}")
-
-        if t_col2.button("✏️ แก้ไข", key=f"edit_t_{t_obj['id']}"):
-            st.session_state[f"editing_t_{t_obj['id']}"] = True
-
-        if t_col3.button("🗑️ ลบ", key=f"del_t_{t_obj['id']}"):
-            db.collection("tasks").document(t_obj["id"]).delete()
-            st.toast("🗑️ ลบข้อความภารกิจสำเร็จ!", icon="✅")
-            time.sleep(1)
-            st.rerun()
-
-        if st.session_state.get(f"editing_t_{t_obj['id']}", False):
-            with st.container():
-                e_task = st.text_area(
-                    "แก้ไขรายละเอียดภารกิจ",
-                    value=t_obj["task_detail"],
-                    key=f"et_text_{t_obj['id']}",
-                )
-                if st.button("💾 อัปเดตภารกิจ", key=f"save_t_{t_obj['id']}"):
-                    db.collection("tasks").document(t_obj["id"]).update(
-                        {"task_detail": e_task}
-                    )
-                    st.session_state[f"editing_t_{t_obj['id']}"] = False
-                    st.toast("📝 แก้ไขข้อความสำเร็จ!", icon="🎉")
-                    time.sleep(1)
-                    st.rerun()
