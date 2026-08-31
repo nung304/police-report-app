@@ -251,7 +251,11 @@ with st.container(border=True):
         key="drive_uploader"
     )
     
-    DRIVE_FOLDER_ID = st.secrets.get("gdrive_folder_id", "") 
+    # อ่านค่าจาก [gdrive] -> folder_id หรือ gdrive_folder_id
+    try:
+        DRIVE_FOLDER_ID = st.secrets["gdrive"]["folder_id"]
+    except Exception:
+        DRIVE_FOLDER_ID = st.secrets.get("gdrive_folder_id", "")
 
     if uploaded_photos:
         if st.button("📤 เริ่มอัปโหลดรูปภาพทั้งหมดเข้า Drive", use_container_width=True):
