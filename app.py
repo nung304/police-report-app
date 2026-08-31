@@ -50,7 +50,7 @@ st.html(
 )
 
 
-# --- 3. เชื่อมต่อฐานข้อมูล NoSQL (Firebase Firestore) ---
+# --- 3. เชื่อมต่อฐานข้อมูล Firebase Firestore ---
 @st.cache_resource
 def get_firestore_client():
     cred_dict = dict(st.secrets["firebase"])
@@ -67,8 +67,8 @@ def get_firestore_client():
 db = get_firestore_client()
 
 
-# --- 4. ฟังก์ชันส่งข้อความ + ภาพ ผ่าน LINE Messaging API (LINE OA) ---
-def send_line_oa_push(message_text, image_url=None):
+# --- 4. ฟังก์ชันส่งข้อความ + หลายภาพ ผ่าน LINE Messaging API ---
+def send_line_oa_push(message_text, image_urls=None):
     try:
         line_secrets = st.secrets["line"]
         token = line_secrets["channel_access_token"]
@@ -82,13 +82,14 @@ def send_line_oa_push(message_text, image_url=None):
 
         messages = [{"type": "text", "text": message_text}]
 
-        # เพิ่มข้อความรูปภาพ (LINE ต้องใช้ Direct Image URL ที่เป็น https:// เท่านั้น)
-        if image_url:
-            messages.append({
-                "type": "image",
-                "originalContentUrl": image_url,
-                "previewImageUrl": image_url,
-            })
+        if image_urls:
+            # LINE Messaging API รองรับการส่ง Message Object ได้สูงสุด 5 รายการต่อ 1 Push
+            for img_url in image_urls[:4]:
+                messages.append({
+                    "type": "image",
+                    "originalContentUrl": img_url,
+                    "previewImageUrl": img_url,
+                })
 
         payload = {"to": group_id, "messages": messages}
         res = requests.post(url, headers=headers, json=payload, timeout=10)
@@ -97,7 +98,7 @@ def send_line_oa_push(message_text, image_url=None):
         return False, str(e)
 
 
-# --- 5. ส่วนควบคุม CSS สำหรับจัดแต่งกรอบหน้าตาเว็บ ---
+# --- 5. การตกแต่งหน้าตา UI ---
 st.markdown(
     """
     <style>
@@ -224,7 +225,7 @@ st.markdown(
 )
 
 
-# --- 6. ฟังก์ชัน โหลด/บันทึก และ จัดลำดับยศตำรวจ ---
+# --- 6. ฟังก์ชัน โหลด/จัดลำดับ ยศตำรวจ ---
 def get_rank_priority(rank_str):
     ranks_priority = {
         "พล.ต.อ.": 1,
@@ -330,9 +331,12 @@ def load_tasks():
     return tasks
 
 
-# --- ฟังก์ชันจัดการคลังรูปภาพที่อัปโหลดไว้ ---
 def load_uploaded_images():
-    docs = db.collection("images").order_by("created_at", direction=firestore.Query.DESCENDING).stream()
+    docs = (
+        db.collection("images")
+        .order_by("created_at", direction=firestore.Query.DESCENDING)
+        .stream()
+    )
     images = []
     for doc in docs:
         img_data = doc.to_dict()
@@ -469,16 +473,19 @@ with tab1:
                                 + list(officer_options.keys()),
                                 key=f"t2_team_member_{i}_{j}",
                             )
-                            if team_select_t2 != "-- ไม่ระบุชื่อ (ใช้พร้อมพวก) --":
+                            if (
+                                team_select_t2
+                                != "-- ไม่ระบุชื่อ (ใช้พร้อมพวก) --"
+                            ):
                                 member_t2 = officer_options[team_select_t2]
-                                team_member_lines_t2 += (
-                                    f"\n{member_t2['rank']}{member_t2['name']}\n{member_t2['position']}"
-                                )
+                                team_member_lines_t2 += f"\n{member_t2['rank']}{member_t2['name']}\n{member_t2['position']}"
                                 has_team_names_t2 = True
 
                     suffix_t2 = ""
                     if with_team_t2:
-                        suffix_t2 = " พร้อมด้วย" if has_team_names_t2 else " พร้อมพวก"
+                        suffix_t2 = (
+                            " พร้อมด้วย" if has_team_names_t2 else " พร้อมพวก"
+                        )
 
                     time_input_t2 = st.text_input(
                         f"⏰ เวลาภารกิจที่ {i+1} (น.)",
@@ -511,16 +518,21 @@ with tab1:
 
                         if task_detail_t2.strip():
                             st.markdown(
-                                '<div class="inline-save-btn">', unsafe_allow_html=True
+                                '<div class="inline-save-btn">',
+                                unsafe_allow_html=True,
                             )
                             if st.button(
-                                "💾 บันทึกภารกิจนี้เข้าคลังถาวร", key=f"inline_save_btn_{i}"
+                                "💾 บันทึกภารกิจนี้เข้าคลังถาวร",
+                                key=f"inline_save_btn_{i}",
                             ):
                                 new_text = task_detail_t2.strip()
                                 if new_text not in raw_tasks_list:
-                                    db.collection("tasks").add({"task_detail": new_text})
+                                    db.collection("tasks").add(
+                                        {"task_detail": new_text}
+                                    )
                                     st.toast(
-                                        "🎉 บันทึกภารกิจเรื่องใหม่เข้าคลังสำเร็จ!", icon="💾"
+                                        "🎉 บันทึกภารกิจเรื่องใหม่เข้าคลังสำเร็จ!",
+                                        icon="💾",
                                     )
                                     time.sleep(1)
                                     st.rerun()
@@ -546,6 +558,53 @@ with tab1:
 
     with t2_col2:
         with st.container(border=True):
+            # --- ส่วนอัปโหลดและเลือกรูปภาพประกอบรายงาน (ย้ายมาไว้ด้านบนสุด) ---
+            st.markdown("### 🖼️ แนบรูปภาพประกอบรายงาน")
+
+            # 1. ปุ่มอัปโหลดไฟล์สด (เลือกได้หลายรูปพร้อมกัน + ไม่ต้องตั้งชื่อ)
+            uploaded_live_files_t1 = st.file_uploader(
+                "📤 อัปโหลดรูปภาพใหม่จากเครื่อง (เลือกได้หลายรูป)",
+                type=["png", "jpg", "jpeg"],
+                accept_multiple_files=True,
+                key="live_upload_t1",
+            )
+
+            # 2. ตัวเลือกเลือกรูปจากคลังที่เคยอัปโหลดไว้
+            img_dict_t1 = {
+                f"📸 {img.get('title', 'รูปภาพ')} ({img.get('uploaded_date', '')})": img.get(
+                    "url"
+                )
+                for img in uploaded_images_list
+            }
+            selected_repo_imgs_t1 = st.multiselect(
+                "หรือเลือกรูปภาพที่มีอยู่ในคลัง",
+                options=list(img_dict_t1.keys()),
+                key="t1_multi_img_select",
+            )
+
+            # รวบรวม URL รูปภาพทั้งหมดที่จะส่ง
+            selected_img_urls_t1 = []
+
+            if uploaded_live_files_t1:
+                for file in uploaded_live_files_t1:
+                    bytes_data = file.getvalue()
+                    b64_str = base64.b64encode(bytes_data).decode()
+                    selected_img_urls_t1.append(f"data:image/png;base64,{b64_str}")
+
+            if selected_repo_imgs_t1:
+                for label in selected_repo_imgs_t1:
+                    selected_img_urls_t1.append(img_dict_t1[label])
+
+            if selected_img_urls_t1:
+                st.markdown(
+                    f"**📷 รูปภาพที่แนบไว้ ({len(selected_img_urls_t1)} ภาพ):**"
+                )
+                img_cols = st.columns(min(len(selected_img_urls_t1), 4))
+                for idx, u_url in enumerate(selected_img_urls_t1):
+                    img_cols[idx % 4].image(u_url, use_container_width=True)
+
+            st.divider()
+
             st.markdown("### 📋 ข้อความสรุปรวม Line")
 
             if no_cases:
@@ -562,28 +621,19 @@ with tab1:
 
             st.code(final_text_t2, language="text")
 
-            # --- ส่วนการเลือกรูปภาพประกอบรายงาน ---
-            st.markdown("🖼️ **เลือกรูปภาพแนบส่งพร้อมรายงาน (LINE OA)**")
-            img_options = {"-- ไม่แนบรูปภาพ --": None}
-            for img in uploaded_images_list:
-                img_options[f"📸 {img.get('title', 'รูปภาพ')} ({img.get('uploaded_date', '')})"] = img.get("url")
-
-            selected_img_label_t1 = st.selectbox(
-                "เลือกรูปภาพที่ต้องการส่งแนบ",
-                options=list(img_options.keys()),
-                key="t1_img_select",
-            )
-            selected_img_url_t1 = img_options[selected_img_label_t1]
-
-            if selected_img_url_t1:
-                st.image(selected_img_url_t1, caption="รูปภาพที่เลือก", use_container_width=True)
-
-            # --- ปุ่มส่ง LINE OA ยิงตรงเข้ากลุ่ม ---
-            if st.button("🚀 ส่งรายงานเข้ากลุ่ม LINE ทันที (LINE OA)", key="btn_send_line_t1"):
+            # --- ปุ่มส่ง LINE OA ---
+            if st.button(
+                "🚀 ส่งรายงานเข้ากลุ่ม LINE ทันที (LINE OA)",
+                key="btn_send_line_t1",
+            ):
                 with st.spinner("กำลังส่งรายงานเข้ากลุ่ม LINE..."):
-                    success, err_msg = send_line_oa_push(final_text_t2, selected_img_url_t1)
+                    success, err_msg = send_line_oa_push(
+                        final_text_t2, selected_img_urls_t1
+                    )
                     if success:
-                        st.success("✅ ส่งรายงานและรูปภาพเข้ากลุ่ม LINE เรียบร้อยแล้ว!")
+                        st.success(
+                            "✅ ส่งรายงานและรูปภาพเข้ากลุ่ม LINE เรียบร้อยแล้ว!"
+                        )
                     else:
                         st.error(f"❌ ส่งข้อความไม่สำเร็จ: {err_msg}")
 
@@ -656,9 +706,7 @@ with tab2:
                     )
                     if team_select != "-- ไม่ระบุชื่อ (ใช้พร้อมพวก) --":
                         member = officer_options[team_select]
-                        team_member_lines += (
-                            f"\n{member['rank']}{member['name']}\n{member['position']}"
-                        )
+                        team_member_lines += f"\n{member['rank']}{member['name']}\n{member['position']}"
                         has_team_names = True
 
             suffix = ""
@@ -688,7 +736,9 @@ with tab2:
                 if selected_task:
                     processed_task = selected_task
                     if processed_task.startswith("ได้นำ"):
-                        processed_task = processed_task.replace("ได้นำ", "นำ", 1)
+                        processed_task = processed_task.replace(
+                            "ได้นำ", "นำ", 1
+                        )
                     all_task_details.append(processed_task)
 
             with st.expander("➕ เพิ่มภารกิจใหม่บันทึกเข้าฐานข้อมูล"):
@@ -698,7 +748,9 @@ with tab2:
                 if st.button("💾 บันทึกภารกิจถาวร", key="t1_save_task"):
                     if new_detail:
                         if new_detail not in raw_tasks_list:
-                            db.collection("tasks").add({"task_detail": new_detail})
+                            db.collection("tasks").add(
+                                {"task_detail": new_detail}
+                            )
                             st.toast("🎉 เพิ่มภารกิจใหม่สำเร็จ!", icon="💾")
                             time.sleep(1)
                             st.rerun()
@@ -713,10 +765,56 @@ with tab2:
             if len(valid_tasks) == 1:
                 final_tasks_text = valid_tasks[0]
             elif len(valid_tasks) > 1:
-                final_tasks_text = "\n".join([f"- {task}" for task in valid_tasks])
+                final_tasks_text = "\n".join(
+                    [f"- {task}" for task in valid_tasks]
+                )
 
     with main_col3:
         with st.container(border=True):
+            # --- ส่วนอัปโหลดและเลือกรูปภาพประกอบรายงาน Tab 2 (ย้ายมาไว้ด้านบนสุด) ---
+            st.markdown("### 🖼️ แนบรูปภาพประกอบรายงาน")
+
+            uploaded_live_files_t2 = st.file_uploader(
+                "📤 อัปโหลดรูปภาพใหม่จากเครื่อง (เลือกได้หลายรูป)",
+                type=["png", "jpg", "jpeg"],
+                accept_multiple_files=True,
+                key="live_upload_t2",
+            )
+
+            img_dict_t2 = {
+                f"📸 {img.get('title', 'รูปภาพ')} ({img.get('uploaded_date', '')})": img.get(
+                    "url"
+                )
+                for img in uploaded_images_list
+            }
+            selected_repo_imgs_t2 = st.multiselect(
+                "หรือเลือกรูปภาพที่มีอยู่ในคลัง",
+                options=list(img_dict_t2.keys()),
+                key="t2_multi_img_select",
+            )
+
+            selected_img_urls_t2 = []
+
+            if uploaded_live_files_t2:
+                for file in uploaded_live_files_t2:
+                    bytes_data = file.getvalue()
+                    b64_str = base64.b64encode(bytes_data).decode()
+                    selected_img_urls_t2.append(f"data:image/png;base64,{b64_str}")
+
+            if selected_repo_imgs_t2:
+                for label in selected_repo_imgs_t2:
+                    selected_img_urls_t2.append(img_dict_t2[label])
+
+            if selected_img_urls_t2:
+                st.markdown(
+                    f"**📷 รูปภาพที่แนบไว้ ({len(selected_img_urls_t2)} ภาพ):**"
+                )
+                img_cols_t2 = st.columns(min(len(selected_img_urls_t2), 4))
+                for idx, u_url in enumerate(selected_img_urls_t2):
+                    img_cols_t2[idx % 4].image(u_url, use_container_width=True)
+
+            st.divider()
+
             st.markdown("### 📋 ข้อความรายงานสำหรับส่ง Line")
 
             report_text = f"""สภ.ไม้แก่น 
@@ -730,28 +828,19 @@ with tab2:
 
             st.code(report_text, language="text")
 
-            # --- ส่วนเลือกรูปภาพสำหรับ tab2 ---
-            st.markdown("🖼️ **เลือกรูปภาพแนบส่งพร้อมรายงาน (LINE OA)**")
-            img_options_t2 = {"-- ไม่แนบรูปภาพ --": None}
-            for img in uploaded_images_list:
-                img_options_t2[f"📸 {img.get('title', 'รูปภาพ')} ({img.get('uploaded_date', '')})"] = img.get("url")
-
-            selected_img_label_t2 = st.selectbox(
-                "เลือกรูปภาพที่ต้องการส่งแนบ",
-                options=list(img_options_t2.keys()),
-                key="t2_img_select",
-            )
-            selected_img_url_t2 = img_options_t2[selected_img_label_t2]
-
-            if selected_img_url_t2:
-                st.image(selected_img_url_t2, caption="รูปภาพที่เลือก", use_container_width=True)
-
-            # --- ปุ่มส่ง LINE OA ยิงตรงเข้ากลุ่ม ---
-            if st.button("🚀 ส่งรายงานเข้ากลุ่ม LINE ทันที (LINE OA)", key="btn_send_line_t2"):
+            # --- ปุ่มส่ง LINE OA ---
+            if st.button(
+                "🚀 ส่งรายงานเข้ากลุ่ม LINE ทันที (LINE OA)",
+                key="btn_send_line_t2",
+            ):
                 with st.spinner("กำลังส่งรายงานเข้ากลุ่ม LINE..."):
-                    success, err_msg = send_line_oa_push(report_text, selected_img_url_t2)
+                    success, err_msg = send_line_oa_push(
+                        report_text, selected_img_urls_t2
+                    )
                     if success:
-                        st.success("✅ ส่งรายงานและรูปภาพเข้ากลุ่ม LINE เรียบร้อยแล้ว!")
+                        st.success(
+                            "✅ ส่งรายงานและรูปภาพเข้ากลุ่ม LINE เรียบร้อยแล้ว!"
+                        )
                     else:
                         st.error(f"❌ ส่งข้อความไม่สำเร็จ: {err_msg}")
 
@@ -781,7 +870,9 @@ with tab2:
 
 st.markdown("---")
 with st.expander(
-    "⚙️ ตั้งค่าระบบหลังบ้าน (จัดการรายชื่อ / จัดการคลังภารกิจ / จัดการคลังรูปภาพ)", expanded=False
+    "⚙️ ตั้งค่าระบบหลังบ้าน (จัดการรายชื่อ / จัดการคลังภารกิจ /"
+    " จัดการคลังรูปภาพ)",
+    expanded=False,
 ):
 
     st.markdown("#### 👤 1. จัดการรายชื่อเจ้าหน้าที่")
@@ -867,42 +958,34 @@ with st.expander(
                     time.sleep(1)
                     st.rerun()
 
-    # --- เพิ่ม 3. จัดการคลังรูปภาพ (อัปโหลดเข้าคลังเก็บไว้เลย ไม่ส่งทันที) ---
     st.markdown("---")
-    st.markdown("#### 📸 3. อัปโหลดรูปภาพเก็บเข้าคลัง (เพื่อไว้เลือกส่งภายหลัง)")
+    st.markdown("#### 📸 3. อัปโหลดรูปภาพเก็บไว้ในคลังถาวร")
     
     with st.form("upload_image_form", clear_on_submit=True):
-        img_title = st.text_input("ชื่อ/คำอธิบายรูปภาพ (เช่น ภาพส่งฝากขังศาล, ภาพส่งสำนวน)")
-        img_url_input = st.text_input("ลิงก์ URL ของรูปภาพ (Direct HTTPS URL) เช่น จาก GitHub / Imgur")
-        uploaded_file = st.file_uploader("หรือเลือกไฟล์รูปภาพจากเครื่อง", type=["png", "jpg", "jpeg"])
+        uploaded_files_repo = st.file_uploader(
+            "เลือกไฟล์รูปภาพจากเครื่องเพื่อเก็บเข้าคลัง (เลือกได้หลายรูป)", 
+            type=["png", "jpg", "jpeg"],
+            accept_multiple_files=True
+        )
         
         submit_img = st.form_submit_button("⬆️ อัปโหลดเก็บเข้าคลังภาพ")
         
-        if submit_img:
-            final_img_url = ""
-            if img_url_input.strip():
-                final_img_url = img_url_input.strip()
-            elif uploaded_file is not None:
-                # กรณีอัปโหลดไฟล์ สามารถนำไปสร้าง Base64 หรืออัปโหลดเข้า Cloud Storage
-                # เพื่อความสะดวก ตัวอย่างนี้แปลงเป็น Data URL หรือใช้ direct URL ที่ระบุ
-                bytes_data = uploaded_file.getvalue()
+        if submit_img and uploaded_files_repo:
+            for file in uploaded_files_repo:
+                bytes_data = file.getvalue()
                 b64_str = base64.b64encode(bytes_data).decode()
                 final_img_url = f"data:image/png;base64,{b64_str}"
-            
-            if final_img_url and img_title:
+                
                 db.collection("images").add({
-                    "title": img_title,
+                    "title": file.name,
                     "url": final_img_url,
                     "uploaded_date": datetime.now().strftime("%d/%m/%Y %H:%M"),
                     "created_at": firestore.SERVER_TIMESTAMP
                 })
-                st.toast("🎉 อัปโหลดและบันทึกรูปภาพเข้าคลังสำเร็จ!", icon="📸")
-                time.sleep(1)
-                st.rerun()
-            else:
-                st.error("❌ กรุณาระบุชื่อภาพ และ ลิงก์รูปภาพ หรือไฟล์รูปภาพ")
+            st.toast("🎉 บันทึกรูปภาพเข้าคลังสำเร็จ!", icon="📸")
+            time.sleep(1)
+            st.rerun()
 
-    # แสดงรายการรูปภาพในคลัง
     st.markdown("##### 📁 รายการรูปภาพทั้งหมดในคลัง")
     for img_item in uploaded_images_list:
         i_col1, i_col2, i_col3 = st.columns([6, 2, 2])
