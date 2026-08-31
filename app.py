@@ -131,7 +131,11 @@ def send_line_oa_push(message_text):
         return False, str(e)
 
 
-def send_line_oa_image(image_url):
+def send_line_oa_multiple_images(image_urls):
+    """ฟังก์ชันส่งรูปภาพหลายรูปเข้า LINE โดยแบ่งส่งครั้งละ 5 รูปตามข้อจำกัดของ API"""
+    if not image_urls:
+        return False, "ไม่ได้เลือกรูปภาพ"
+
     try:
         line_secrets = st.secrets["line"]
         token = line_secrets["channel_access_token"]
@@ -142,26 +146,37 @@ def send_line_oa_image(image_url):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}",
         }
-        payload = {
-            "to": group_id,
-            "messages": [
+
+        # แบ่งกลุ่มรูปภาพชุดละไม่เกิน 5 รูป (โควต้าสูงสุดของ LINE Push API)
+        chunks = [image_urls[i : i + 5] for i in range(0, len(image_urls), 5)]
+
+        for chunk in chunks:
+            messages = [
                 {
                     "type": "image",
-                    "originalContentUrl": image_url,
-                    "previewImageUrl": image_url,
+                    "originalContentUrl": img_url,
+                    "previewImageUrl": img_url,
                 }
-            ],
-        }
-        res = requests.post(url, headers=headers, json=payload, timeout=10)
-        return res.status_code == 200, res.text
+                for img_url in chunk
+            ]
+
+            payload = {
+                "to": group_id,
+                "messages": messages,
+            }
+            res = requests.post(url, headers=headers, json=payload, timeout=10)
+            if res.status_code != 200:
+                return False, res.text
+
+        return True, ""
     except Exception as e:
         return False, str(e)
 
 
-# Component สำหรับแสดงคลังรูปภาพย่อยท้ายรายงาน
+# Component สำหรับแสดงคลังรูปภาพตารางย่อยท้ายรายงาน
 def render_image_gallery_section(key_prefix="gallery"):
     st.markdown("### 🖼️ แนบรูปภาพจากคลังส่งเข้า LINE")
-    
+
     with st.expander("📤 อัปโหลดรูปภาพใหม่เข้าคลังถาวร", expanded=False):
         uploaded_photos = st.file_uploader(
             "📂 เลือกรูปภาพ (เลือกพร้อมกันได้หลายรูป)",
@@ -170,11 +185,17 @@ def render_image_gallery_section(key_prefix="gallery"):
             key=f"{key_prefix}_uploader",
         )
         if uploaded_photos:
-            if st.button("📤 เริ่มอัปโหลดเข้าคลัง", key=f"{key_prefix}_btn_upload", use_container_width=True):
+            if st.button(
+                "📤 เริ่มอัปโหลดเข้าคลัง",
+                key=f"{key_prefix}_btn_upload",
+                use_container_width=True,
+            ):
                 with st.spinner("⏳ กำลังอัปโหลดรูปภาพ..."):
                     urls = upload_images_to_cloudinary(uploaded_photos)
                     if urls:
-                        st.success(f"✅ อัปโหลดรูปภาพสำเร็จจำนวน {len(urls)} รูป!")
+                        st.success(
+                            f"✅ อัปโหลดรูปภาพสำเร็จจำนวน {len(urls)} รูป!"
+                        )
                         time.sleep(1)
                         st.rerun()
 
@@ -187,20 +208,40 @@ def render_image_gallery_section(key_prefix="gallery"):
     if not images_list:
         st.info("ยังไม่มีรูปภาพในคลัง")
     else:
-        cols = st.columns(3)
-        for idx, img in enumerate(images_list):
-            with cols[idx % 3]:
-                st.image(img["url"], use_container_width=True)
-                col_btn1, col_btn2 = st.columns(2)
-                if col_btn1.button("🚀 ส่งรูปนี้", key=f"{key_prefix}_send_{idx}"):
-                    with st.spinner("กำลังส่งรูปเข้า LINE..."):
-                        success, err = send_line_oa_image(img["url"])
+        with st.form(key=f"{key_prefix}_form"):
+            submit_btn = st.form_submit_button(
+                "🚀 ส่งรูปภาพที่เลือกเข้า LINE", use_container_width=True
+            )
+
+            cols = st.columns(4)  # ตาราง 4 คอลัมน์สำหรับรูปภาพขนาดเล็ก
+            selections = []
+
+            for idx, img in enumerate(images_list):
+                with cols[idx % 4]:
+                    st.image(img["url"], use_container_width=True)
+                    is_selected = st.checkbox(
+                        "☑️ เลือก", key=f"{key_prefix}_check_{idx}"
+                    )
+                    selections.append((is_selected, img["url"]))
+
+            if submit_btn:
+                selected_urls = [url for is_sel, url in selections if is_sel]
+
+                if not selected_urls:
+                    st.warning("⚠️ กรุณาติ๊กเลือกรูปภาพอย่างน้อย 1 รูป")
+                else:
+                    with st.spinner(
+                        f"กำลังส่ง {len(selected_urls)} รูปเข้า LINE..."
+                    ):
+                        success, err = send_line_oa_multiple_images(
+                            selected_urls
+                        )
                         if success:
-                            st.toast("✅ ส่งรูปภาพเข้า LINE สำเร็จ!")
+                            st.success(
+                                f"✅ ส่งรูปภาพจำนวน {len(selected_urls)} รูปเข้ากลุ่ม LINE สำเร็จ!"
+                            )
                         else:
                             st.error(f"❌ ส่งไม่สำเร็จ: {err}")
-                if col_btn2.button("📋 คัดลอก", key=f"{key_prefix}_copy_{idx}"):
-                    st.code(img["url"], language="text")
 
 
 # --- 6. จัดแต่ง CSS หน้าตาเว็บ ---
@@ -309,6 +350,7 @@ st.markdown(
     '<p class="main-subtitle">งานสอบสวน สภ.ไม้แก่น (ระบบฐานข้อมูล NoSQL Cloud)</p>',
     unsafe_allow_html=True,
 )
+
 
 # --- 7. โหลด/บันทึก ข้อมูลตำรวจและคลังภารกิจ ---
 def get_rank_priority(rank_str):
