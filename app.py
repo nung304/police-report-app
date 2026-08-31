@@ -236,7 +236,15 @@ def upload_images_to_drive(uploaded_files, folder_id):
                 'parents': [folder_id]
             }
             
-            service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+            # บังคับอัปโหลดเข้าโฟลเดอร์ที่แชร์ไว้โดยตรง (รองรับการแชร์ข้ามบัญชี)
+            service.files().create(
+                body=file_metadata, 
+                media_body=media, 
+                fields='id',
+                supportsAllDrives=True,
+                supportsTeamDrives=True
+            ).execute()
+            
             uploaded_count += 1
         except Exception as e:
             st.error(f"❌ เกิดข้อผิดพลาดกับไฟล์ {file.name}: {e}")
