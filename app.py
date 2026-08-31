@@ -158,6 +158,51 @@ def send_line_oa_image(image_url):
         return False, str(e)
 
 
+# Component สำหรับแสดงคลังรูปภาพย่อยท้ายรายงาน
+def render_image_gallery_section(key_prefix="gallery"):
+    st.markdown("### 🖼️ แนบรูปภาพจากคลังส่งเข้า LINE")
+    
+    with st.expander("📤 อัปโหลดรูปภาพใหม่เข้าคลังถาวร", expanded=False):
+        uploaded_photos = st.file_uploader(
+            "📂 เลือกรูปภาพ (เลือกพร้อมกันได้หลายรูป)",
+            type=["png", "jpg", "jpeg", "webp"],
+            accept_multiple_files=True,
+            key=f"{key_prefix}_uploader",
+        )
+        if uploaded_photos:
+            if st.button("📤 เริ่มอัปโหลดเข้าคลัง", key=f"{key_prefix}_btn_upload", use_container_width=True):
+                with st.spinner("⏳ กำลังอัปโหลดรูปภาพ..."):
+                    urls = upload_images_to_cloudinary(uploaded_photos)
+                    if urls:
+                        st.success(f"✅ อัปโหลดรูปภาพสำเร็จจำนวน {len(urls)} รูป!")
+                        time.sleep(1)
+                        st.rerun()
+
+    col_title, col_ref = st.columns([4, 1])
+    with col_ref:
+        if st.button("🔄 รีเฟรชรูป", key=f"{key_prefix}_refresh"):
+            st.rerun()
+
+    images_list = get_cloudinary_images()
+    if not images_list:
+        st.info("ยังไม่มีรูปภาพในคลัง")
+    else:
+        cols = st.columns(3)
+        for idx, img in enumerate(images_list):
+            with cols[idx % 3]:
+                st.image(img["url"], use_container_width=True)
+                col_btn1, col_btn2 = st.columns(2)
+                if col_btn1.button("🚀 ส่งรูปนี้", key=f"{key_prefix}_send_{idx}"):
+                    with st.spinner("กำลังส่งรูปเข้า LINE..."):
+                        success, err = send_line_oa_image(img["url"])
+                        if success:
+                            st.toast("✅ ส่งรูปภาพเข้า LINE สำเร็จ!")
+                        else:
+                            st.error(f"❌ ส่งไม่สำเร็จ: {err}")
+                if col_btn2.button("📋 คัดลอก", key=f"{key_prefix}_copy_{idx}"):
+                    st.code(img["url"], language="text")
+
+
 # --- 6. จัดแต่ง CSS หน้าตาเว็บ ---
 st.markdown(
     """
@@ -265,64 +310,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# --- 7. ส่วนฝากรูปถาวร & คลังรูปภาพ (Cloudinary) ---
-st.markdown("---")
-st.markdown("### ☁️ ระบบคลังรูปภาพประกอบคดี (ฝากรูปถาวร)")
-
-tab_cld_upload, tab_cld_gallery = st.tabs(
-    ["📤 อัปโหลดรูปภาพใหม่", "🖼️ เลือกรูปเก่าจากคลังส่งเข้า LINE"]
-)
-
-with tab_cld_upload:
-    uploaded_photos = st.file_uploader(
-        "📂 เลือกรูปภาพ (เลือกพร้อมกันได้หลายรูป)",
-        type=["png", "jpg", "jpeg", "webp"],
-        accept_multiple_files=True,
-        key="cld_uploader",
-    )
-
-    if uploaded_photos:
-        if st.button("📤 เริ่มอัปโหลดเข้าคลังถาวร", use_container_width=True):
-            with st.spinner("⏳ กำลังอัปโหลดรูปภาพ..."):
-                urls = upload_images_to_cloudinary(uploaded_photos)
-                if urls:
-                    st.success(
-                        f"✅ อัปโหลดรูปภาพสำเร็จจำนวน {len(urls)} รูป!"
-                    )
-                    time.sleep(1.5)
-                    st.rerun()
-
-with tab_cld_gallery:
-    st.markdown("##### 📜 คลังรูปภาพทั้งหมดที่เก็บบันทึกไว้")
-    if st.button("🔄 รีเฟรชรายการรูปภาพ", key="btn_refresh_img"):
-        st.rerun()
-
-    images_list = get_cloudinary_images()
-
-    if not images_list:
-        st.info("ยังไม่มีรูปภาพในคลัง")
-    else:
-        cols = st.columns(3)
-        for idx, img in enumerate(images_list):
-            with cols[idx % 3]:
-                st.image(img["url"], use_container_width=True)
-                col_btn1, col_btn2 = st.columns(2)
-
-                if col_btn1.button("🚀 ส่ง LINE", key=f"send_line_{idx}"):
-                    with st.spinner("กำลังส่งรูปเข้า LINE..."):
-                        success, err = send_line_oa_image(img["url"])
-                        if success:
-                            st.toast("✅ ส่งรูปภาพเข้า LINE สำเร็จ!")
-                        else:
-                            st.error(f"❌ ส่งไม่สำเร็จ: {err}")
-
-                if col_btn2.button("📋 ดู URL", key=f"copy_url_{idx}"):
-                    st.code(img["url"], language="text")
-
-st.markdown("---")
-
-
-# --- 8. โหลด/บันทึก ข้อมูลตำรวจและคลังภารกิจ ---
+# --- 7. โหลด/บันทึก ข้อมูลตำรวจและคลังภารกิจ ---
 def get_rank_priority(rank_str):
     ranks_priority = {
         "พล.ต.อ.": 1,
@@ -478,7 +466,7 @@ date_str = f"{date_input.day} {months_th[date_input.month-1]}{year_th}"
 
 st.markdown("---")
 
-# --- 9. หน้าสร้างรายงาน LINE ---
+# --- 8. หน้าสร้างรายงาน LINE ---
 tab1, tab2 = st.tabs([
     "📝 1. รายงานสรุปผลการปฏิบัติประจำวัน (แยกคน/เวลา/ภารกิจ)",
     "👮‍♂️ 2. รายงานรูปแบบเดิม (เดี่ยว/พร้อมพวก)",
@@ -680,6 +668,10 @@ with tab1:
                 unsafe_allow_html=True,
             )
 
+    # --- ส่วนคลังรูปภาพแนบส่ง LINE ด้านล่างของ Tab 1 ---
+    st.markdown("---")
+    render_image_gallery_section(key_prefix="tab1_gallery")
+
 with tab2:
     main_col1, main_col2, main_col3 = st.columns([1, 1, 1.1])
 
@@ -830,7 +822,11 @@ with tab2:
                 unsafe_allow_html=True,
             )
 
-# --- 10. ระบบหลังบ้าน จัดการรายชื่อ/คลังภารกิจ ---
+    # --- ส่วนคลังรูปภาพแนบส่ง LINE ด้านล่างของ Tab 2 ---
+    st.markdown("---")
+    render_image_gallery_section(key_prefix="tab2_gallery")
+
+# --- 9. ระบบหลังบ้าน จัดการรายชื่อ/คลังภารกิจ ---
 st.markdown("---")
 with st.expander(
     "⚙️ ตั้งค่าระบบหลังบ้าน (จัดการรายชื่อ / จัดการคลังภารกิจ)", expanded=False
