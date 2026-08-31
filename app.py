@@ -1,11 +1,12 @@
 from datetime import datetime
+import io
 import time
 import urllib.parse
-import io
+import cloudinary
+import cloudinary.api
+import cloudinary.uploader
 from google.cloud import firestore
 from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
 import requests
 import streamlit as st
 
@@ -17,7 +18,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# --- 2. ส่ง Meta Tags ซ่อนตัวสำหรับ LINE ---
+# --- 2. ส่ง Meta Tags สำหรับ LINE ---
 st.html(
     """
     <style>
@@ -51,20 +52,64 @@ st.html(
     """
 )
 
-# --- 3. เชื่อมต่อฐานข้อมูล NoSQL (Firebase Firestore) ---
+# --- 3. เชื่อมต่อ Cloudinary & Firestore ---
+cloudinary.config(
+    cloud_name=st.secrets["cloudinary"]["cloud_name"],
+    api_key=st.secrets["cloudinary"]["api_key"],
+    api_secret=st.secrets["cloudinary"]["api_secret"],
+    secure=True,
+)
+
+
 @st.cache_resource
 def get_firestore_client():
     cred_dict = dict(st.secrets["firebase"])
     if "private_key" in cred_dict:
-        cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n").strip()
+        cred_dict["private_key"] = (
+            cred_dict["private_key"].replace("\\n", "\n").strip()
+        )
 
     creds = service_account.Credentials.from_service_account_info(cred_dict)
     db = firestore.Client(credentials=creds, project=cred_dict["project_id"])
     return db
 
+
 db = get_firestore_client()
 
-# --- 4. ฟังก์ชันส่งข้อความผ่าน LINE Messaging API (LINE OA) ---
+
+# --- 4. ฟังก์ชันฝากรูปและคลังรูปภาพ (Cloudinary) ---
+def upload_images_to_cloudinary(uploaded_files, folder_name="police_reports"):
+    uploaded_urls = []
+    for file in uploaded_files:
+        try:
+            response = cloudinary.uploader.upload(
+                file, folder=folder_name, resource_type="image"
+            )
+            uploaded_urls.append(response.get("secure_url"))
+        except Exception as e:
+            st.error(f"❌ เกิดข้อผิดพลาดกับไฟล์ {file.name}: {e}")
+    return uploaded_urls
+
+
+def get_cloudinary_images(folder_name="police_reports"):
+    try:
+        result = cloudinary.api.resources(
+            type="upload", prefix=folder_name, max_results=100
+        )
+        images = []
+        for resource in result.get("resources", []):
+            images.append({
+                "public_id": resource["public_id"],
+                "url": resource["secure_url"],
+                "created_at": resource["created_at"],
+            })
+        return images
+    except Exception as e:
+        st.error(f"❌ ไม่สามารถดึงข้อมูลคลังรูปภาพได้: {e}")
+        return []
+
+
+# --- 5. ฟังก์ชันส่งข้อความ / รูปภาพ เข้า LINE OA ---
 def send_line_oa_push(message_text):
     try:
         line_secrets = st.secrets["line"]
@@ -85,7 +130,35 @@ def send_line_oa_push(message_text):
     except Exception as e:
         return False, str(e)
 
-# --- 5. ส่วนควบคุม CSS สำหรับจัดแต่งกรอบหน้าตาเว็บ ---
+
+def send_line_oa_image(image_url):
+    try:
+        line_secrets = st.secrets["line"]
+        token = line_secrets["channel_access_token"]
+        group_id = line_secrets["group_id"]
+
+        url = "https://api.line.me/v2/bot/message/push"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        }
+        payload = {
+            "to": group_id,
+            "messages": [
+                {
+                    "type": "image",
+                    "originalContentUrl": image_url,
+                    "previewImageUrl": image_url,
+                }
+            ],
+        }
+        res = requests.post(url, headers=headers, json=payload, timeout=10)
+        return res.status_code == 200, res.text
+    except Exception as e:
+        return False, str(e)
+
+
+# --- 6. จัดแต่ง CSS หน้าตาเว็บ ---
 st.markdown(
     """
     <style>
@@ -171,28 +244,9 @@ st.markdown(
         .inline-save-btn button:hover {
             background-color: #218838 !important;
         }
-        @media (prefers-color-scheme: dark) {
-            .inline-save-btn button {
-                background-color: #34d399 !important;
-                color: #0f172a !important;
-            }
-            .inline-save-btn button:hover {
-                background-color: #059669 !important;
-            }
-        }
 
-        .main-title {
-            text-align: center; 
-            color: #0c2340; 
-            font-weight: bold;
-            margin-bottom: 0;
-        }
-        .main-subtitle {
-            text-align: center; 
-            color: #666666; 
-            font-size: 0.95rem; 
-            margin-bottom: 25px;
-        }
+        .main-title { text-align: center; color: #0c2340; font-weight: bold; margin-bottom: 0; }
+        .main-subtitle { text-align: center; color: #666666; font-size: 0.95rem; margin-bottom: 25px; }
         @media (prefers-color-scheme: dark) {
             .main-title { color: #ffffff; }
             .main-subtitle { color: #94a3b8; }
@@ -211,75 +265,64 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-
-# --- 5.1 ระบบอัปโหลดรูปภาพลง Google Drive ---
+# --- 7. ส่วนฝากรูปถาวร & คลังรูปภาพ (Cloudinary) ---
 st.markdown("---")
-st.markdown("### ☁️ อัปโหลดรูปภาพประกอบคดีลง Google Drive")
+st.markdown("### ☁️ ระบบคลังรูปภาพประกอบคดี (ฝากรูปถาวร)")
 
-def upload_images_to_drive(uploaded_files, folder_id):
-    SCOPES = ['https://www.googleapis.com/auth/drive']
-    cred_dict = dict(st.secrets["firebase"])
-    if "private_key" in cred_dict:
-        cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n").strip()
-    
-    creds = service_account.Credentials.from_service_account_info(cred_dict, scopes=SCOPES)
-    service = build('drive', 'v3', credentials=creds)
+tab_cld_upload, tab_cld_gallery = st.tabs(
+    ["📤 อัปโหลดรูปภาพใหม่", "🖼️ เลือกรูปเก่าจากคลังส่งเข้า LINE"]
+)
 
-    uploaded_count = 0
-    for file in uploaded_files:
-        try:
-            file_stream = io.BytesIO(file.getvalue())
-            media = MediaIoBaseUpload(file_stream, mimetype=file.type, resumable=True)
-            
-            file_metadata = {
-                'name': f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.name}",
-                'parents': [folder_id]
-            }
-            
-            # บังคับอัปโหลดเข้าโฟลเดอร์ที่แชร์ไว้โดยตรง (รองรับการแชร์ข้ามบัญชี)
-            service.files().create(
-                body=file_metadata, 
-                media_body=media, 
-                fields='id',
-                supportsAllDrives=True,
-                supportsTeamDrives=True
-            ).execute()
-            
-            uploaded_count += 1
-        except Exception as e:
-            st.error(f"❌ เกิดข้อผิดพลาดกับไฟล์ {file.name}: {e}")
-            
-    return uploaded_count
-
-with st.container(border=True):
+with tab_cld_upload:
     uploaded_photos = st.file_uploader(
-        "📂 เลือกรูปภาพ (เลือกพร้อมกันได้หลายรูป)", 
-        type=["png", "jpg", "jpeg", "webp"], 
+        "📂 เลือกรูปภาพ (เลือกพร้อมกันได้หลายรูป)",
+        type=["png", "jpg", "jpeg", "webp"],
         accept_multiple_files=True,
-        key="drive_uploader"
+        key="cld_uploader",
     )
-    
-    # อ่านค่าจาก [gdrive] -> folder_id หรือ gdrive_folder_id
-    try:
-        DRIVE_FOLDER_ID = st.secrets["gdrive"]["folder_id"]
-    except Exception:
-        DRIVE_FOLDER_ID = st.secrets.get("gdrive_folder_id", "")
 
     if uploaded_photos:
-        if st.button("📤 เริ่มอัปโหลดรูปภาพทั้งหมดเข้า Drive", use_container_width=True):
-            if not DRIVE_FOLDER_ID:
-                st.error("⚠️ ยังไม่ได้ตั้งค่า Google Drive Folder ID ใน st.secrets")
-            else:
-                with st.spinner("⏳ กำลังอัปโหลดรูปภาพ... กรุณารอสักครู่"):
-                    success_count = upload_images_to_drive(uploaded_photos, DRIVE_FOLDER_ID)
-                    if success_count > 0:
-                        st.success(f"✅ อัปโหลดรูปภาพสำเร็จจำนวน {success_count} รูป!")
-                        time.sleep(2)
-                        st.rerun()
+        if st.button("📤 เริ่มอัปโหลดเข้าคลังถาวร", use_container_width=True):
+            with st.spinner("⏳ กำลังอัปโหลดรูปภาพ..."):
+                urls = upload_images_to_cloudinary(uploaded_photos)
+                if urls:
+                    st.success(
+                        f"✅ อัปโหลดรูปภาพสำเร็จจำนวน {len(urls)} รูป!"
+                    )
+                    time.sleep(1.5)
+                    st.rerun()
+
+with tab_cld_gallery:
+    st.markdown("##### 📜 คลังรูปภาพทั้งหมดที่เก็บบันทึกไว้")
+    if st.button("🔄 รีเฟรชรายการรูปภาพ", key="btn_refresh_img"):
+        st.rerun()
+
+    images_list = get_cloudinary_images()
+
+    if not images_list:
+        st.info("ยังไม่มีรูปภาพในคลัง")
+    else:
+        cols = st.columns(3)
+        for idx, img in enumerate(images_list):
+            with cols[idx % 3]:
+                st.image(img["url"], use_container_width=True)
+                col_btn1, col_btn2 = st.columns(2)
+
+                if col_btn1.button("🚀 ส่ง LINE", key=f"send_line_{idx}"):
+                    with st.spinner("กำลังส่งรูปเข้า LINE..."):
+                        success, err = send_line_oa_image(img["url"])
+                        if success:
+                            st.toast("✅ ส่งรูปภาพเข้า LINE สำเร็จ!")
+                        else:
+                            st.error(f"❌ ส่งไม่สำเร็จ: {err}")
+
+                if col_btn2.button("📋 ดู URL", key=f"copy_url_{idx}"):
+                    st.code(img["url"], language="text")
+
 st.markdown("---")
 
 
-# --- 6. ฟังก์ชัน โหลด/บันทึก และ จัดลำดับยศตำรวจ ---
+# --- 8. โหลด/บันทึก ข้อมูลตำรวจและคลังภารกิจ ---
 def get_rank_priority(rank_str):
     ranks_priority = {
         "พล.ต.อ.": 1,
@@ -298,6 +341,7 @@ def get_rank_priority(rank_str):
         "ส.ต.ต.": 14,
     }
     return ranks_priority.get(rank_str.strip(), 99)
+
 
 def load_personnel():
     docs = db.collection("personnel").stream()
@@ -352,6 +396,7 @@ def load_personnel():
     personnel.sort(key=lambda x: get_rank_priority(x["rank"]))
     return personnel
 
+
 def load_tasks():
     docs = db.collection("tasks").stream()
     tasks = []
@@ -381,6 +426,7 @@ def load_tasks():
             db.collection("tasks").add({"task_detail": t})
         st.rerun()
     return tasks
+
 
 personnel_list = load_personnel()
 tasks_data = load_tasks()
@@ -432,6 +478,7 @@ date_str = f"{date_input.day} {months_th[date_input.month-1]}{year_th}"
 
 st.markdown("---")
 
+# --- 9. หน้าสร้างรายงาน LINE ---
 tab1, tab2 = st.tabs([
     "📝 1. รายงานสรุปผลการปฏิบัติประจำวัน (แยกคน/เวลา/ภารกิจ)",
     "👮‍♂️ 2. รายงานรูปแบบเดิม (เดี่ยว/พร้อมพวก)",
@@ -783,6 +830,7 @@ with tab2:
                 unsafe_allow_html=True,
             )
 
+# --- 10. ระบบหลังบ้าน จัดการรายชื่อ/คลังภารกิจ ---
 st.markdown("---")
 with st.expander(
     "⚙️ ตั้งค่าระบบหลังบ้าน (จัดการรายชื่อ / จัดการคลังภารกิจ)", expanded=False
