@@ -173,7 +173,7 @@ def send_line_oa_multiple_images(image_urls):
         return False, str(e)
 
 
-# Component สำหรับแสดงคลังรูปภาพตารางย่อยท้ายรายงาน
+# Component สำหรับแสดงคลังรูปภาพตารางขนาดเล็ก (แสดงผล 6 คอลัมน์)
 def render_image_gallery_section(key_prefix="gallery"):
     st.markdown("### 🖼️ แนบรูปภาพจากคลังส่งเข้า LINE")
 
@@ -208,17 +208,37 @@ def render_image_gallery_section(key_prefix="gallery"):
     if not images_list:
         st.info("ยังไม่มีรูปภาพในคลัง")
     else:
+        # ตกแต่ง CSS ให้รูปแสดงเป็น Thumbnail ขนาดเล็ก ความสูง 110px
+        st.markdown(
+            """
+            <style>
+                .thumb-container img {
+                    height: 110px !important;
+                    object-fit: cover !important;
+                    border-radius: 8px !important;
+                    border: 1px solid #cbd5e1 !important;
+                }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
         with st.form(key=f"{key_prefix}_form"):
             submit_btn = st.form_submit_button(
                 "🚀 ส่งรูปภาพที่เลือกเข้า LINE", use_container_width=True
             )
 
-            cols = st.columns(4)  # ตาราง 4 คอลัมน์สำหรับรูปภาพขนาดเล็ก
+            # แบ่งเป็น 6 คอลัมน์เพื่อให้เห็นรูปพร้อมกันจำนวนมากในหน้าจอเดียว
+            cols = st.columns(6)
             selections = []
 
             for idx, img in enumerate(images_list):
-                with cols[idx % 4]:
+                with cols[idx % 6]:
+                    st.markdown(
+                        '<div class="thumb-container">', unsafe_allow_html=True
+                    )
                     st.image(img["url"], use_container_width=True)
+                    st.markdown("</div>", unsafe_allow_html=True)
                     is_selected = st.checkbox(
                         "☑️ เลือก", key=f"{key_prefix}_check_{idx}"
                     )
