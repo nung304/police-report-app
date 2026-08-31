@@ -132,7 +132,7 @@ def send_line_oa_push(message_text):
 
 
 def send_line_oa_multiple_images(image_urls):
-    """ฟังก์ชันส่งรูปภาพหลายรูปเข้า LINE โดยวนลูปส่งทีละรูปอย่างต่อเนื่อง (เสถียรที่สุด)"""
+    """ฟังก์ชันส่งรูปภาพหลายรูปเข้า LINE โดยจัดกลุ่มส่งสูงสุดครั้งละ 5 รูปใน 1 Request"""
     if not image_urls:
         return False, "ไม่ได้เลือกรูปภาพ"
 
@@ -147,22 +147,28 @@ def send_line_oa_multiple_images(image_urls):
             "Authorization": f"Bearer {token}",
         }
 
-        # วนลูปส่งทีละภาพ เพื่อความเสถียรและป้องกันข้อผิดพลาดจาก API Payload
-        for img_url in image_urls:
-            payload = {
-                "to": group_id,
-                "messages": [{
+        # แบ่งกลุ่มรูปภาพชุดละไม่เกิน 5 รูป (โควต้าสูงสุดต่อ 1 Push Message ของ LINE API)
+        chunks = [image_urls[i:i + 5] for i in range(0, len(image_urls), 5)]
+
+        for chunk in chunks:
+            messages = []
+            for img_url in chunk:
+                messages.append({
                     "type": "image",
                     "originalContentUrl": img_url,
                     "previewImageUrl": img_url,
-                }],
+                })
+
+            payload = {
+                "to": group_id,
+                "messages": messages,
             }
+            
             res = requests.post(url, headers=headers, json=payload, timeout=10)
             if res.status_code != 200:
                 return False, f"Error code {res.status_code}: {res.text}"
             
-            # หน่วงเวลาเล็กน้อยเพื่อไม่ให้ยิงถี่เกินไป (Rate Limit)
-            time.sleep(0.3)
+            time.sleep(0.5)
 
         return True, ""
     except Exception as e:
