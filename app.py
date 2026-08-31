@@ -172,7 +172,6 @@ def send_line_oa_multiple_images(image_urls):
     except Exception as e:
         return False, str(e)
 
-
 # Component สำหรับแสดงคลังรูปภาพตารางขนาดเล็ก (แสดงผล 6 คอลัมน์)
 def render_image_gallery_section(key_prefix="gallery"):
     st.markdown("### 🖼️ แนบรูปภาพจากคลังส่งเข้า LINE")
