@@ -132,7 +132,7 @@ def send_line_oa_push(message_text):
 
 
 def send_line_oa_multiple_images(image_urls):
-    """ฟังก์ชันส่งรูปภาพหลายรูปเข้า LINE โดยจัดกลุ่มส่งสูงสุดครั้งละ 5 รูปใน 1 Request"""
+    """ส่งรูปภาพหลายรูปในรูปแบบ Flex Message Carousel (การ์ดสไลด์รวมในกล่องเดียว)"""
     if not image_urls:
         return False, "ไม่ได้เลือกรูปภาพ"
 
@@ -147,28 +147,35 @@ def send_line_oa_multiple_images(image_urls):
             "Authorization": f"Bearer {token}",
         }
 
-        # แบ่งกลุ่มรูปภาพชุดละไม่เกิน 5 รูป (โควต้าสูงสุดต่อ 1 Push Message ของ LINE API)
-        chunks = [image_urls[i:i + 5] for i in range(0, len(image_urls), 5)]
-
-        for chunk in chunks:
-            messages = []
-            for img_url in chunk:
-                messages.append({
+        # LINE Flex Carousel รองรับสูงสุด 12 การ์ดต่อ 1 ข้อความ
+        bubbles = []
+        for img_url in image_urls[:12]:
+            bubbles.append({
+                "type": "bubble",
+                "size": "micro",
+                "hero": {
                     "type": "image",
-                    "originalContentUrl": img_url,
-                    "previewImageUrl": img_url,
-                })
+                    "url": img_url,
+                    "size": "full",
+                    "aspectRatio": "1:1",
+                    "aspectMode": "cover",
+                },
+            })
 
-            payload = {
-                "to": group_id,
-                "messages": messages,
-            }
-            
-            res = requests.post(url, headers=headers, json=payload, timeout=10)
-            if res.status_code != 200:
-                return False, f"Error code {res.status_code}: {res.text}"
-            
-            time.sleep(0.5)
+        flex_payload = {
+            "to": group_id,
+            "messages": [{
+                "type": "flex",
+                "altText": f"🖼️ แนบรูปภาพรายงานจำนวน {len(image_urls[:12])} รูป",
+                "contents": {"type": "carousel", "contents": bubbles},
+            }],
+        }
+
+        res = requests.post(
+            url, headers=headers, json=flex_payload, timeout=10
+        )
+        if res.status_code != 200:
+            return False, f"Error code {res.status_code}: {res.text}"
 
         return True, ""
     except Exception as e:
@@ -227,7 +234,7 @@ def render_image_gallery_section(key_prefix="gallery"):
 
         with st.form(key=f"{key_prefix}_form"):
             submit_btn = st.form_submit_button(
-                "🚀 ส่งรูปภาพที่เลือกเข้า LINE", use_container_width=True
+                "🚀 ส่งรูปภาพที่เลือกเข้า LINE (แบบ Flex Carousel)", use_container_width=True
             )
 
             # แบ่งเป็น 6 คอลัมน์เพื่อให้เห็นรูปพร้อมกันจำนวนมากในหน้าจอเดียว
@@ -260,7 +267,7 @@ def render_image_gallery_section(key_prefix="gallery"):
                         )
                         if success:
                             st.success(
-                                f"✅ ส่งรูปภาพจำนวน {len(selected_urls)} รูปเข้ากลุ่ม LINE สำเร็จ!"
+                                f"✅ ส่งชุดรูปภาพจำนวน {len(selected_urls[:12])} รูปเข้ากลุ่ม LINE สำเร็จ!"
                             )
                         else:
                             st.error(f"❌ ส่งไม่สำเร็จ: {err}")
