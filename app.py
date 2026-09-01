@@ -20,7 +20,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ** ใส่ LIFF ID ของคุณที่นี่ **
+# ** ดึง LIFF ID จาก Secrets **
 LIFF_ID = st.secrets.get("line", {}).get("liff_id", "YOUR_LIFF_ID_HERE")
 
 # --- 2. ส่ง Meta Tags สำหรับ LINE ---
@@ -117,7 +117,7 @@ def send_line_oa_push(message_text):
         return False, str(e)
 
 
-# Component ปุ่มส่งรูปภาพแบ่งเป็นชุดละไม่เกิน 5 รูป
+# --- 6. Component ปุ่มส่งรูปภาพแบ่งเป็นชุดละไม่เกิน 5 รูป (ปรับปรุงโครงสร้าง HTML) ---
 def render_liff_send_button(image_urls, key_suffix=""):
     if not image_urls:
         return
@@ -141,69 +141,95 @@ def render_liff_send_button(image_urls, key_suffix=""):
         button_label = f"🟢 ชุดที่ {idx+1}/{total_batches}: กดส่งรูปที่ {start_idx} - {end_idx} เข้ากลุ่ม LINE"
 
         liff_code = f"""
-        <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-        <div style="font-family: sans-serif; text-align: center; margin-bottom: 5px;">
-            <button id="sendBtn_{key_suffix}_{idx}" onclick="sendImages_{key_suffix}_{idx}()" style="
-                background-color: #06C755;
-                color: white;
-                border: none;
-                padding: 12px 20px;
-                border-radius: 10px;
-                font-size: 15px;
-                font-weight: bold;
-                width: 100%;
-                cursor: pointer;
-                box-shadow: 0 3px 6px rgba(0,0,0,0.1);
-                transition: 0.3s;
-            ">
-                {button_label}
-            </button>
-            <p id="status_{key_suffix}_{idx}" style="font-size: 12px; color: #666; margin-top: 4px; margin-bottom: 0px;"></p>
-        </div>
-
-        <script>
-            const liffId_{key_suffix}_{idx} = "{LIFF_ID}";
-            const imageUrls_{key_suffix}_{idx} = {urls_json};
-
-            async function sendImages_{key_suffix}_{idx}() {{
-                const statusEl = document.getElementById("status_{key_suffix}_{idx}");
-                const btnEl = document.getElementById("sendBtn_{key_suffix}_{idx}");
-                statusEl.innerText = "กำลังเชื่อมต่อ LINE...";
-                try {{
-                    await liff.init({{ liffId: liffId_{key_suffix}_{idx} }});
-                    
-                    if (!liff.isLoggedIn()) {{
-                        liff.login();
-                        return;
-                    }}
-
-                    if (liff.isApiAvailable('shareTargetPicker')) {{
-                        const messages = imageUrls_{key_suffix}_{idx}.map(url => ({{
-                            type: 'image',
-                            originalContentUrl: url,
-                            previewImageUrl: url
-                        }}));
-
-                        statusEl.innerText = "กำลังเปิดหน้าเลือกกลุ่ม LINE...";
-                        const res = await liff.shareTargetPicker(messages);
-                        if (res) {{
-                            statusEl.innerText = "✅ ส่งชุดที่ {idx+1} เรียบร้อยแล้ว!";
-                            btnEl.style.backgroundColor = "#10B981";
-                            btnEl.innerText = "✔️ ส่งชุดที่ {idx+1} (รูปที่ {start_idx}-{end_idx}) สำเร็จแล้ว";
-                        }} else {{
-                            statusEl.innerText = "ยกเลิกการส่ง";
-                        }}
-                    }} else {{
-                        alert("อุปกรณ์นี้ไม่รองรับ Share Target Picker");
-                    }}
-                }} catch (err) {{
-                    console.error(err);
-                    statusEl.innerText = "เกิดข้อผิดพลาด: " + err.message;
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+            <style>
+                body {{
+                    margin: 0;
+                    padding: 0;
+                    background-color: transparent;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
                 }}
-            }}
-        </script>
+                .btn-send {{
+                    background-color: #06C755;
+                    color: white;
+                    border: none;
+                    padding: 12px 20px;
+                    border-radius: 10px;
+                    font-size: 15px;
+                    font-weight: bold;
+                    width: 100%;
+                    cursor: pointer;
+                    box-shadow: 0 3px 6px rgba(0,0,0,0.15);
+                    transition: 0.2s;
+                }}
+                .btn-send:hover {{
+                    background-color: #05b34c;
+                }}
+                .status-txt {{
+                    font-size: 12px;
+                    color: #888888;
+                    margin-top: 5px;
+                    text-align: center;
+                }}
+            </style>
+        </head>
+        <body>
+            <div>
+                <button id="sendBtn_{key_suffix}_{idx}" class="btn-send" onclick="sendImages_{key_suffix}_{idx}()">
+                    {button_label}
+                </button>
+                <div id="status_{key_suffix}_{idx}" class="status-txt"></div>
+            </div>
+
+            <script>
+                const liffId_{key_suffix}_{idx} = "{LIFF_ID}";
+                const imageUrls_{key_suffix}_{idx} = {urls_json};
+
+                async function sendImages_{key_suffix}_{idx}() {{
+                    const statusEl = document.getElementById("status_{key_suffix}_{idx}");
+                    const btnEl = document.getElementById("sendBtn_{key_suffix}_{idx}");
+                    statusEl.innerText = "กำลังเชื่อมต่อ LINE...";
+                    try {{
+                        await liff.init({{ liffId: liffId_{key_suffix}_{idx} }});
+                        
+                        if (!liff.isLoggedIn()) {{
+                            liff.login();
+                            return;
+                        }}
+
+                        if (liff.isApiAvailable('shareTargetPicker')) {{
+                            const messages = imageUrls_{key_suffix}_{idx}.map(url => ({{
+                                type: 'image',
+                                originalContentUrl: url,
+                                previewImageUrl: url
+                            }}));
+
+                            statusEl.innerText = "กำลังเปิดหน้าเลือกกลุ่ม LINE...";
+                            const res = await liff.shareTargetPicker(messages);
+                            if (res) {{
+                                statusEl.innerText = "✅ ส่งชุดที่ {idx+1} เรียบร้อยแล้ว!";
+                                btnEl.style.backgroundColor = "#10B981";
+                                btnEl.innerText = "✔️ ส่งชุดที่ {idx+1} (รูปที่ {start_idx}-{end_idx}) สำเร็จแล้ว";
+                            }} else {{
+                                statusEl.innerText = "ยกเลิกการส่ง";
+                            }}
+                        }} else {{
+                            alert("อุปกรณ์นี้ไม่รองรับ Share Target Picker");
+                        }}
+                    }} catch (err) {{
+                        console.error(err);
+                        statusEl.innerText = "เกิดข้อผิดพลาด: " + err.message;
+                    }}
+                }}
+            </script>
+        </body>
+        </html>
         """
-        components.html(liff_code, height=85)
+        components.html(liff_code, height=90)
 
 
 # Component สำหรับแสดงคลังรูปภาพตารางขนาดเล็ก
@@ -279,7 +305,7 @@ def render_image_gallery_section(key_prefix="gallery"):
             render_liff_send_button(selected_urls, key_suffix=key_prefix)
 
 
-# --- 6. จัดแต่ง CSS หน้าตาเว็บ ---
+# --- 7. จัดแต่ง CSS หน้าตาเว็บ ---
 st.markdown(
     """
     <style>
@@ -378,7 +404,7 @@ st.markdown(
 )
 
 
-# --- 7. โหลด/บันทึก ข้อมูลตำรวจและคลังภารกิจ ---
+# --- 8. โหลด/บันทึก ข้อมูลตำรวจและคลังภารกิจ ---
 def get_rank_priority(rank_str):
     ranks_priority = {
         "พล.ต.อ.": 1,
@@ -534,7 +560,7 @@ date_str = f"{date_input.day} {months_th[date_input.month-1]}{year_th}"
 
 st.markdown("---")
 
-# --- 8. หน้าสร้างรายงาน LINE ---
+# --- 9. หน้าสร้างรายงาน LINE ---
 tab1, tab2 = st.tabs([
     "📝 1. รายงานสรุปผลการปฏิบัติประจำวัน (แยกคน/เวลา/ภารกิจ)",
     "👮‍♂️ 2. รายงานรูปแบบเดิม (เดี่ยว/พร้อมพวก)",
