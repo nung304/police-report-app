@@ -1,5 +1,6 @@
 from datetime import datetime
 import io
+import json
 import time
 import urllib.parse
 import cloudinary
@@ -19,7 +20,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ** ใส่ LIFF ID ของคุณที่นี่ (สร้างได้จาก LINE Developers Console) **
+# ** ใส่ LIFF ID ของคุณที่นี่ **
 LIFF_ID = st.secrets.get("line", {}).get("liff_id", "YOUR_LIFF_ID_HERE")
 
 # --- 2. ส่ง Meta Tags สำหรับ LINE ---
@@ -62,7 +63,7 @@ def get_firestore_client():
 db = get_firestore_client()
 
 
-# --- 4. ฟังก์ชันฝากรูปและคลังรูปภาพ (Cloudinary) ---
+# --- 4. ฟังก์ชันฝากรูปและคลังรูปภาพ ---
 def upload_images_to_cloudinary(uploaded_files, folder_name="police_reports"):
     uploaded_urls = []
     for file in uploaded_files:
@@ -116,79 +117,96 @@ def send_line_oa_push(message_text):
         return False, str(e)
 
 
-# Component ปุ่มส่งรูปภาพเข้า LINE ผ่าน LIFF (มัดรวมรูปในนามผู้ใช้)
+# Component ปุ่มส่งรูปภาพแบ่งเป็นชุดละไม่เกิน 5 รูป
 def render_liff_send_button(image_urls, key_suffix=""):
     if not image_urls:
         return
 
-    import json
+    def chunk_list(lst, n=5):
+        return [lst[i : i + n] for i in range(0, len(lst), n)]
 
-    urls_json = json.dumps(image_urls)
+    batches = chunk_list(image_urls, 5)
+    total_images = len(image_urls)
+    total_batches = len(batches)
 
-    liff_code = f"""
-    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-    <div style="font-family: sans-serif; text-align: center;">
-        <button id="sendBtn" onclick="sendImages()" style="
-            background-color: #06C755;
-            color: white;
-            border: none;
-            padding: 12px 20px;
-            border-radius: 10px;
-            font-size: 16px;
-            font-weight: bold;
-            width: 100%;
-            cursor: pointer;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        ">
-            🟢 กดส่ง {len(image_urls)} รูปเข้ากลุ่ม LINE (มัดรวมเป็นตาราง)
-        </button>
-        <p id="status" style="font-size: 12px; color: #666; margin-top: 5px;"></p>
-    </div>
+    st.markdown(
+        f"#### 📤 รายการส่งรูปภาพทั้งหมด {total_images} รูป (แบ่งเป็น {total_batches} ชุด)"
+    )
 
-    <script>
-        const liffId = "{LIFF_ID}";
-        const imageUrls = {urls_json};
+    for idx, batch in enumerate(batches):
+        start_idx = idx * 5 + 1
+        end_idx = start_idx + len(batch) - 1
+        urls_json = json.dumps(batch)
 
-        async function sendImages() {{
-            const statusEl = document.getElementById("status");
-            statusEl.innerText = "กำลังเชื่อมต่อ LINE...";
-            try {{
-                await liff.init({{ liffId: liffId }});
-                
-                if (!liff.isLoggedIn()) {{
-                    liff.login();
-                    return;
-                }}
+        button_label = f"🟢 ชุดที่ {idx+1}/{total_batches}: กดส่งรูปที่ {start_idx} - {end_idx} เข้ากลุ่ม LINE"
 
-                if (liff.isApiAvailable('shareTargetPicker')) {{
-                    // สร้าง Message Objects ยิงส่งในนามผู้ใช้ (LINE จะมัดรวมเป็นตารางให้อัตโนมัติ)
-                    const messages = imageUrls.map(url => ({{
-                        type: 'image',
-                        originalContentUrl: url,
-                        previewImageUrl: url
-                    }}));
+        liff_code = f"""
+        <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+        <div style="font-family: sans-serif; text-align: center; margin-bottom: 5px;">
+            <button id="sendBtn_{key_suffix}_{idx}" onclick="sendImages_{key_suffix}_{idx}()" style="
+                background-color: #06C755;
+                color: white;
+                border: none;
+                padding: 12px 20px;
+                border-radius: 10px;
+                font-size: 15px;
+                font-weight: bold;
+                width: 100%;
+                cursor: pointer;
+                box-shadow: 0 3px 6px rgba(0,0,0,0.1);
+                transition: 0.3s;
+            ">
+                {button_label}
+            </button>
+            <p id="status_{key_suffix}_{idx}" style="font-size: 12px; color: #666; margin-top: 4px; margin-bottom: 0px;"></p>
+        </div>
 
-                    statusEl.innerText = "กำลังเปิดหน้าเลือกกลุ่ม LINE...";
-                    const res = await liff.shareTargetPicker(messages);
-                    if (res) {{
-                        statusEl.innerText = "✅ ส่งรูปภาพเรียบร้อยแล้ว!";
-                    }} else {{
-                        statusEl.innerText = "ยกเลิกการส่ง";
+        <script>
+            const liffId_{key_suffix}_{idx} = "{LIFF_ID}";
+            const imageUrls_{key_suffix}_{idx} = {urls_json};
+
+            async function sendImages_{key_suffix}_{idx}() {{
+                const statusEl = document.getElementById("status_{key_suffix}_{idx}");
+                const btnEl = document.getElementById("sendBtn_{key_suffix}_{idx}");
+                statusEl.innerText = "กำลังเชื่อมต่อ LINE...";
+                try {{
+                    await liff.init({{ liffId: liffId_{key_suffix}_{idx} }});
+                    
+                    if (!liff.isLoggedIn()) {{
+                        liff.login();
+                        return;
                     }}
-                }} else {{
-                    alert("อุปกรณ์นี้ไม่รองรับ Share Target Picker");
+
+                    if (liff.isApiAvailable('shareTargetPicker')) {{
+                        const messages = imageUrls_{key_suffix}_{idx}.map(url => ({{
+                            type: 'image',
+                            originalContentUrl: url,
+                            previewImageUrl: url
+                        }}));
+
+                        statusEl.innerText = "กำลังเปิดหน้าเลือกกลุ่ม LINE...";
+                        const res = await liff.shareTargetPicker(messages);
+                        if (res) {{
+                            statusEl.innerText = "✅ ส่งชุดที่ {idx+1} เรียบร้อยแล้ว!";
+                            btnEl.style.backgroundColor = "#10B981";
+                            btnEl.innerText = "✔️ ส่งชุดที่ {idx+1} (รูปที่ {start_idx}-{end_idx}) สำเร็จแล้ว";
+                        }} else {{
+                            statusEl.innerText = "ยกเลิกการส่ง";
+                        }}
+                    }} else {{
+                        alert("อุปกรณ์นี้ไม่รองรับ Share Target Picker");
+                    }}
+                }} catch (err) {{
+                    console.error(err);
+                    statusEl.innerText = "เกิดข้อผิดพลาด: " + err.message;
                 }}
-            }} catch (err) {{
-                console.error(err);
-                statusEl.innerText = "เกิดข้อผิดพลาด: " + err.message;
             }}
-        }}
-    </script>
-    """
-    components.html(liff_code, height=90)
+        </script>
+        """
+        components.html(liff_code, height=85)
 
 
-# Component สำหรับแสดงคลังรูปภาพตารางขนาดเล็ก (แสดงผล 6 คอลัมน์)
+# Component สำหรับแสดงคลังรูปภาพตารางขนาดเล็ก
 def render_image_gallery_section(key_prefix="gallery"):
     st.markdown("### 🖼️ เลือกรูปภาพจากคลังเพื่อส่งเข้า LINE")
 
@@ -248,14 +266,16 @@ def render_image_gallery_section(key_prefix="gallery"):
                 st.image(img["url"], use_container_width=True)
                 st.markdown("</div>", unsafe_allow_html=True)
                 is_selected = st.checkbox(
-                    "☑️ เลือก", key=f"{key_prefix}_check_{idx}"
+                    f"☑️ รูปที่ {idx+1}", key=f"{key_prefix}_check_{idx}"
                 )
                 if is_selected:
                     selected_urls.append(img["url"])
 
         if selected_urls:
             st.markdown("---")
-            st.markdown(f"**📌 เลือกไว้แล้วจำนวน {len(selected_urls)} รูป**")
+            st.markdown(
+                f"**📌 เลือกไว้ทั้งหมดจำนวน {len(selected_urls)} รูป**"
+            )
             render_liff_send_button(selected_urls, key_suffix=key_prefix)
 
 
