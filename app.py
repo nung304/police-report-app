@@ -9,6 +9,7 @@ from google.cloud import firestore
 from google.oauth2 import service_account
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 # --- 1. ตั้งค่าหน้าจอ ---
 st.set_page_config(
@@ -17,6 +18,9 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+# ** ใส่ LIFF ID ของคุณที่นี่ (สร้างได้จาก LINE Developers Console) **
+LIFF_ID = st.secrets.get("line", {}).get("liff_id", "YOUR_LIFF_ID_HERE")
 
 # --- 2. ส่ง Meta Tags สำหรับ LINE ---
 st.html(
@@ -30,25 +34,6 @@ st.html(
         <span data-og-description="โปรแกรมช่วยงานสอบสวน สภ.ไม้แก่น สำหรับคัดลอกข้อความรายงานลงกลุ่ม Line"></span>
         <span data-og-image="https://github.com/nung304/police-report-app/blob/main/75858736-e9f9-4ae3-ad7b-2cc685c5f76e.png?raw=true"></span>
     </div>
-    <script>
-        document.title = "ระบบรายงานสรุปผลการปฏิบัติงาน สภ.ไม้แก่น";
-        
-        const updateOrCreateMeta = (property, content) => {
-            let meta = document.querySelector(`meta[property="${property}"]`);
-            if (!meta) {
-                meta = document.createElement('meta');
-                meta.setAttribute('property', property);
-                document.head.appendChild(meta);
-            }
-            meta.content = content;
-        };
-
-        updateOrCreateMeta("og:title", "ระบบรายงานสรุปผลการปฏิบัติงาน สภ.ไม้แก่น");
-        updateOrCreateMeta("og:description", "โปรแกรมช่วยงานสอบสวน สภ.ไม้แก่น สำหรับคัดลอกข้อความรายงานลงกลุ่ม Line");
-        updateOrCreateMeta("og:image", "https://github.com/nung304/police-report-app/blob/main/75858736-e9f9-4ae3-ad7b-2cc685c5f76e.png?raw=true");
-        updateOrCreateMeta("og:url", "https://police-report.streamlit.app/");
-        updateOrCreateMeta("og:type", "website");
-    </script>
     """
 )
 
@@ -109,7 +94,7 @@ def get_cloudinary_images(folder_name="police_reports"):
         return []
 
 
-# --- 5. ฟังก์ชันส่งข้อความ / รูปภาพ เข้า LINE OA ---
+# --- 5. ฟังก์ชันส่งข้อความ LINE OA ---
 def send_line_oa_push(message_text):
     try:
         line_secrets = st.secrets["line"]
@@ -131,60 +116,81 @@ def send_line_oa_push(message_text):
         return False, str(e)
 
 
-def send_line_oa_multiple_images(image_urls):
-    """ส่งรูปภาพหลายรูปในรูปแบบ Flex Message Carousel (การ์ดสไลด์รวมในกล่องเดียว)"""
+# Component ปุ่มส่งรูปภาพเข้า LINE ผ่าน LIFF (มัดรวมรูปในนามผู้ใช้)
+def render_liff_send_button(image_urls, key_suffix=""):
     if not image_urls:
-        return False, "ไม่ได้เลือกรูปภาพ"
+        return
 
-    try:
-        line_secrets = st.secrets["line"]
-        token = line_secrets["channel_access_token"]
-        group_id = line_secrets["group_id"]
+    import json
 
-        url = "https://api.line.me/v2/bot/message/push"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}",
-        }
+    urls_json = json.dumps(image_urls)
 
-        # LINE Flex Carousel รองรับสูงสุด 12 การ์ดต่อ 1 ข้อความ
-        bubbles = []
-        for img_url in image_urls[:12]:
-            bubbles.append({
-                "type": "bubble",
-                "size": "micro",
-                "hero": {
-                    "type": "image",
-                    "url": img_url,
-                    "size": "full",
-                    "aspectRatio": "1:1",
-                    "aspectMode": "cover",
-                },
-            })
+    liff_code = f"""
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <div style="font-family: sans-serif; text-align: center;">
+        <button id="sendBtn" onclick="sendImages()" style="
+            background-color: #06C755;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            width: 100%;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        ">
+            🟢 กดส่ง {len(image_urls)} รูปเข้ากลุ่ม LINE (มัดรวมเป็นตาราง)
+        </button>
+        <p id="status" style="font-size: 12px; color: #666; margin-top: 5px;"></p>
+    </div>
 
-        flex_payload = {
-            "to": group_id,
-            "messages": [{
-                "type": "flex",
-                "altText": f"🖼️ แนบรูปภาพรายงานจำนวน {len(image_urls[:12])} รูป",
-                "contents": {"type": "carousel", "contents": bubbles},
-            }],
-        }
+    <script>
+        const liffId = "{LIFF_ID}";
+        const imageUrls = {urls_json};
 
-        res = requests.post(
-            url, headers=headers, json=flex_payload, timeout=10
-        )
-        if res.status_code != 200:
-            return False, f"Error code {res.status_code}: {res.text}"
+        async function sendImages() {{
+            const statusEl = document.getElementById("status");
+            statusEl.innerText = "กำลังเชื่อมต่อ LINE...";
+            try {{
+                await liff.init({{ liffId: liffId }});
+                
+                if (!liff.isLoggedIn()) {{
+                    liff.login();
+                    return;
+                }}
 
-        return True, ""
-    except Exception as e:
-        return False, str(e)
+                if (liff.isApiAvailable('shareTargetPicker')) {{
+                    // สร้าง Message Objects ยิงส่งในนามผู้ใช้ (LINE จะมัดรวมเป็นตารางให้อัตโนมัติ)
+                    const messages = imageUrls.map(url => ({{
+                        type: 'image',
+                        originalContentUrl: url,
+                        previewImageUrl: url
+                    }}));
+
+                    statusEl.innerText = "กำลังเปิดหน้าเลือกกลุ่ม LINE...";
+                    const res = await liff.shareTargetPicker(messages);
+                    if (res) {{
+                        statusEl.innerText = "✅ ส่งรูปภาพเรียบร้อยแล้ว!";
+                    }} else {{
+                        statusEl.innerText = "ยกเลิกการส่ง";
+                    }}
+                }} else {{
+                    alert("อุปกรณ์นี้ไม่รองรับ Share Target Picker");
+                }}
+            }} catch (err) {{
+                console.error(err);
+                statusEl.innerText = "เกิดข้อผิดพลาด: " + err.message;
+            }}
+        }}
+    </script>
+    """
+    components.html(liff_code, height=90)
 
 
 # Component สำหรับแสดงคลังรูปภาพตารางขนาดเล็ก (แสดงผล 6 คอลัมน์)
 def render_image_gallery_section(key_prefix="gallery"):
-    st.markdown("### 🖼️ แนบรูปภาพจากคลังส่งเข้า LINE")
+    st.markdown("### 🖼️ เลือกรูปภาพจากคลังเพื่อส่งเข้า LINE")
 
     with st.expander("📤 อัปโหลดรูปภาพใหม่เข้าคลังถาวร", expanded=False):
         uploaded_photos = st.file_uploader(
@@ -217,7 +223,6 @@ def render_image_gallery_section(key_prefix="gallery"):
     if not images_list:
         st.info("ยังไม่มีรูปภาพในคลัง")
     else:
-        # ตกแต่ง CSS ให้รูปแสดงเป็น Thumbnail ขนาดเล็ก ความสูง 110px
         st.markdown(
             """
             <style>
@@ -232,45 +237,26 @@ def render_image_gallery_section(key_prefix="gallery"):
             unsafe_allow_html=True,
         )
 
-        with st.form(key=f"{key_prefix}_form"):
-            submit_btn = st.form_submit_button(
-                "🚀 ส่งรูปภาพที่เลือกเข้า LINE (แบบ Flex Carousel)", use_container_width=True
-            )
+        cols = st.columns(6)
+        selected_urls = []
 
-            # แบ่งเป็น 6 คอลัมน์เพื่อให้เห็นรูปพร้อมกันจำนวนมากในหน้าจอเดียว
-            cols = st.columns(6)
-            selections = []
+        for idx, img in enumerate(images_list):
+            with cols[idx % 6]:
+                st.markdown(
+                    '<div class="thumb-container">', unsafe_allow_html=True
+                )
+                st.image(img["url"], use_container_width=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+                is_selected = st.checkbox(
+                    "☑️ เลือก", key=f"{key_prefix}_check_{idx}"
+                )
+                if is_selected:
+                    selected_urls.append(img["url"])
 
-            for idx, img in enumerate(images_list):
-                with cols[idx % 6]:
-                    st.markdown(
-                        '<div class="thumb-container">', unsafe_allow_html=True
-                    )
-                    st.image(img["url"], use_container_width=True)
-                    st.markdown("</div>", unsafe_allow_html=True)
-                    is_selected = st.checkbox(
-                        "☑️ เลือก", key=f"{key_prefix}_check_{idx}"
-                    )
-                    selections.append((is_selected, img["url"]))
-
-            if submit_btn:
-                selected_urls = [url for is_sel, url in selections if is_sel]
-
-                if not selected_urls:
-                    st.warning("⚠️ กรุณาติ๊กเลือกรูปภาพอย่างน้อย 1 รูป")
-                else:
-                    with st.spinner(
-                        f"กำลังส่ง {len(selected_urls)} รูปเข้า LINE..."
-                    ):
-                        success, err = send_line_oa_multiple_images(
-                            selected_urls
-                        )
-                        if success:
-                            st.success(
-                                f"✅ ส่งชุดรูปภาพจำนวน {len(selected_urls[:12])} รูปเข้ากลุ่ม LINE สำเร็จ!"
-                            )
-                        else:
-                            st.error(f"❌ ส่งไม่สำเร็จ: {err}")
+        if selected_urls:
+            st.markdown("---")
+            st.markdown(f"**📌 เลือกไว้แล้วจำนวน {len(selected_urls)} รูป**")
+            render_liff_send_button(selected_urls, key_suffix=key_prefix)
 
 
 # --- 6. จัดแต่ง CSS หน้าตาเว็บ ---
@@ -349,15 +335,6 @@ st.markdown(
             .stButton>button:hover {
                 background-color: #7dd3fc !important;
             }
-        }
-        
-        .inline-save-btn button {
-            background-color: #28a745 !important;
-            height: 2.5em !important;
-            margin-top: 5px !important;
-        }
-        .inline-save-btn button:hover {
-            background-color: #218838 !important;
         }
 
         .main-title { text-align: center; color: #0c2340; font-weight: bold; margin-bottom: 0; }
@@ -656,9 +633,6 @@ with tab1:
                         )
 
                         if task_detail_t2.strip():
-                            st.markdown(
-                                '<div class="inline-save-btn">', unsafe_allow_html=True
-                            )
                             if st.button(
                                 "💾 บันทึกภารกิจนี้เข้าคลังถาวร", key=f"inline_save_btn_{i}"
                             ):
@@ -674,7 +648,6 @@ with tab1:
                                     st.warning(
                                         "⚠️ ภารกิจนี้มีอยู่ในระบบคลังเดิมอยู่แล้ว"
                                     )
-                            st.markdown("</div>", unsafe_allow_html=True)
 
                     if task_detail_t2:
                         item_text = (
@@ -684,11 +657,6 @@ with tab1:
                         report_items_t2.append(item_text)
 
                     st.divider()
-            else:
-                st.info(
-                    "ℹ️ เปิดโหมดรายงานกรณีเหตุการณ์ปกติเรียบร้อยแล้ว"
-                    " ตรวจสอบข้อความสรุปทางด้านขวาได้เลยครับ"
-                )
 
     with t2_col2:
         with st.container(border=True):
@@ -716,30 +684,6 @@ with tab1:
                     else:
                         st.error(f"❌ ส่งข้อความไม่สำเร็จ: {err_msg}")
 
-            encoded_t2 = urllib.parse.quote(final_text_t2)
-            line_share_url_t2 = f"https://line.me/R/share?text={encoded_t2}"
-            st.markdown(
-                f"""
-                <a href="{line_share_url_t2}" target="_blank" style="text-decoration: none;">
-                    <div style="
-                        background-color: #06C755;
-                        color: white;
-                        text-align: center;
-                        padding: 10px;
-                        border-radius: 10px;
-                        font-weight: bold;
-                        font-size: 15px;
-                        margin-top: 8px;
-                        margin-bottom: 8px;
-                        cursor: pointer;">
-                        🟢 เลือกแชท/กลุ่มเพื่อส่งรายงาน (LINE Share)
-                    </div>
-                </a>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    # --- ส่วนคลังรูปภาพแนบส่ง LINE ด้านล่างของ Tab 1 ---
     st.markdown("---")
     render_image_gallery_section(key_prefix="tab1_gallery")
 
@@ -823,22 +767,6 @@ with tab2:
                         processed_task = processed_task.replace("ได้นำ", "นำ", 1)
                     all_task_details.append(processed_task)
 
-            with st.expander("➕ เพิ่มภารกิจใหม่บันทึกเข้าฐานข้อมูล"):
-                new_detail = st.text_area(
-                    "พิมพ์รายละเอียดภารกิจใหม่ที่นี่", key="t1_new_detail"
-                )
-                if st.button("💾 บันทึกภารกิจถาวร", key="t1_save_task"):
-                    if new_detail:
-                        if new_detail not in raw_tasks_list:
-                            db.collection("tasks").add({"task_detail": new_detail})
-                            st.toast("🎉 เพิ่มภารกิจใหม่สำเร็จ!", icon="💾")
-                            time.sleep(1)
-                            st.rerun()
-                        else:
-                            st.error("❌ มีภารกิจนี้ในคลังแล้ว")
-                    else:
-                        st.warning("⚠️ กรุณากรอกข้อความ")
-
             final_tasks_text = ""
             valid_tasks = [task for task in all_task_details if task]
 
@@ -870,118 +798,5 @@ with tab2:
                     else:
                         st.error(f"❌ ส่งข้อความไม่สำเร็จ: {err_msg}")
 
-            encoded_t1 = urllib.parse.quote(report_text)
-            line_share_url_t1 = f"https://line.me/R/share?text={encoded_t1}"
-            st.markdown(
-                f"""
-                <a href="{line_share_url_t1}" target="_blank" style="text-decoration: none;">
-                    <div style="
-                        background-color: #06C755;
-                        color: white;
-                        text-align: center;
-                        padding: 10px;
-                        border-radius: 10px;
-                        font-weight: bold;
-                        font-size: 15px;
-                        margin-top: 8px;
-                        margin-bottom: 8px;
-                        cursor: pointer;">
-                        🟢 เลือกแชท/กลุ่มเพื่อส่งรายงาน (LINE Share)
-                    </div>
-                </a>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    # --- ส่วนคลังรูปภาพแนบส่ง LINE ด้านล่างของ Tab 2 ---
     st.markdown("---")
     render_image_gallery_section(key_prefix="tab2_gallery")
-
-# --- 9. ระบบหลังบ้าน จัดการรายชื่อ/คลังภารกิจ ---
-st.markdown("---")
-with st.expander(
-    "⚙️ ตั้งค่าระบบหลังบ้าน (จัดการรายชื่อ / จัดการคลังภารกิจ)", expanded=False
-):
-
-    st.markdown("#### 👤 1. จัดการรายชื่อเจ้าหน้าที่")
-    with st.form("new_officer_form", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        n_rank = c1.text_input("ยศ (เช่น พ.ต.ท., ร.ต.อ.)")
-        n_name = c2.text_input("ชื่อ-นามสกุล")
-        n_pos = st.text_input("ตำแหน่ง")
-        if st.form_submit_button("💾 บันทึกรายชื่อ") and n_rank and n_name and n_pos:
-            db.collection("personnel").add(
-                {"rank": n_rank, "name": n_name, "position": n_pos}
-            )
-            st.rerun()
-
-    for person in personnel_list:
-        p_col1, p_col2, p_col3 = st.columns([6, 2, 2])
-        p_col1.write(f"**{person['rank']}{person['name']}** - {person['position']}")
-
-        if p_col2.button("✏️ แก้ไข", key=f"edit_p_{person['id']}"):
-            st.session_state[f"editing_p_{person['id']}"] = True
-
-        if p_col3.button("🗑️ ลบ", key=f"del_p_{person['id']}"):
-            db.collection("personnel").document(person["id"]).delete()
-            st.toast("🗑️ ลบรายชื่อเจ้าหน้าที่สำเร็จ!", icon="✅")
-            time.sleep(1)
-            st.rerun()
-
-        if st.session_state.get(f"editing_p_{person['id']}", False):
-            with st.container():
-                ep_rank = st.text_input(
-                    "แก้ไขยศ", value=person["rank"], key=f"ep_rank_{person['id']}"
-                )
-                ep_name = st.text_input(
-                    "แก้ไขชื่อ-นามสกุล",
-                    value=person["name"],
-                    key=f"ep_name_{person['id']}",
-                )
-                ep_pos = st.text_input(
-                    "แก้ไขตำแหน่ง",
-                    value=person["position"],
-                    key=f"ep_pos_{person['id']}",
-                )
-
-                if st.button("💾 อัปเดตรายชื่อ", key=f"save_p_{person['id']}"):
-                    db.collection("personnel").document(person["id"]).update({
-                        "rank": ep_rank,
-                        "name": ep_name,
-                        "position": ep_pos,
-                    })
-                    st.session_state[f"editing_p_{person['id']}"] = False
-                    st.toast("📝 แก้ไขรายชื่อเจ้าหน้าที่สำเร็จ!", icon="🎉")
-                    time.sleep(1)
-                    st.rerun()
-
-    st.markdown("---")
-    st.markdown("#### 📝 2. จัดการคลังข้อความภารกิจ")
-    for t_idx, t_obj in enumerate(tasks_data):
-        t_col1, t_col2, t_col3 = st.columns([6, 2, 2])
-        t_col1.write(f"**{t_idx+1}.** {t_obj['task_detail']}")
-
-        if t_col2.button("✏️ แก้ไข", key=f"edit_t_{t_obj['id']}"):
-            st.session_state[f"editing_t_{t_obj['id']}"] = True
-
-        if t_col3.button("🗑️ ลบ", key=f"del_t_{t_obj['id']}"):
-            db.collection("tasks").document(t_obj["id"]).delete()
-            st.toast("🗑️ ลบข้อความภารกิจสำเร็จ!", icon="✅")
-            time.sleep(1)
-            st.rerun()
-
-        if st.session_state.get(f"editing_t_{t_obj['id']}", False):
-            with st.container():
-                e_task = st.text_area(
-                    "แก้ไขรายละเอียดภารกิจ",
-                    value=t_obj["task_detail"],
-                    key=f"et_text_{t_obj['id']}",
-                )
-                if st.button("💾 อัปเดตภารกิจ", key=f"save_t_{t_obj['id']}"):
-                    db.collection("tasks").document(t_obj["id"]).update(
-                        {"task_detail": e_task}
-                    )
-                    st.session_state[f"editing_t_{t_obj['id']}"] = False
-                    st.toast("📝 แก้ไขข้อความสำเร็จ!", icon="🎉")
-                    time.sleep(1)
-                    st.rerun()
