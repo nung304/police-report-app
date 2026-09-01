@@ -18,29 +18,36 @@
 <body>
     <div class="card">
         <div id="loader" class="spinner"></div>
-        <h3 id="status" style="margin-top:0;">กำลังเชื่อมต่อกับ LINE...</h3>
+        <h3 id="status" style="margin-top:0;">กำลังเตรียมรูปภาพ...</h3>
         <p id="sub-status" style="color: #64748b; font-size: 14px; margin-bottom: 0;"></p>
-        <button id="login-btn" class="btn" onclick="liff.login()">🔑 เข้าสู่ระบบ LINE</button>
+        <button id="login-btn" class="btn" onclick="loginLINE()">🔑 เข้าสู่ระบบ LINE</button>
         <div id="error-detail" class="error-box" style="display:none;"></div>
     </div>
 
     <script>
         const LIFF_ID = "2011360956-IXDp4ofU";
 
-        // ฟังก์ชันดึงค่า parameter ทั้งแบบตรง และแบบผ่าน liff.state
-        function getImgsFromUrl() {
-            const searchParams = new URLSearchParams(window.location.search);
-            if (searchParams.has('imgs')) {
-                return searchParams.get('imgs');
+        // ฟังก์ชันดึงค่า imgs จาก URL โดยใช้ Regex รองรับทั้ง direct URL และ liff.state
+        function getImgsParam() {
+            const fullUrl = window.location.href;
+            
+            // 1. ค้นหา ?imgs= หรือ &imgs= จาก URL โดยตรง
+            const matchDirect = fullUrl.match(/[?&]imgs=([^&View#]+)/);
+            if (matchDirect) return decodeURIComponent(matchDirect[1]);
+
+            // 2. ค้นหาจาก liff.state กรณี LINE แปลง URL
+            const matchState = fullUrl.match(/[?&]liff\.state=([^&View#]+)/);
+            if (matchState) {
+                const decodedState = decodeURIComponent(matchState[1]);
+                const stateMatch = decodedState.match(/[?&]imgs=([^&View#]+)/);
+                if (stateMatch) return decodeURIComponent(stateMatch[1]);
             }
-            if (searchParams.has('liff.state')) {
-                const liffState = searchParams.get('liff.state');
-                const stateParams = new URLSearchParams(liffState.startsWith('?') ? liffState : '?' + liffState);
-                if (stateParams.has('imgs')) {
-                    return stateParams.get('imgs');
-                }
-            }
+
             return null;
+        }
+
+        function loginLINE() {
+            liff.login({ redirectUri: window.location.href });
         }
 
         async function main() {
@@ -51,20 +58,20 @@
             const errorBox = document.getElementById('error-detail');
 
             try {
-                // 1. ตรวจสอบข้อมูลรูปภาพ
-                const rawImgs = getImgsFromUrl();
+                // 1. ดึงข้อมูลรูปภาพ
+                const rawImgs = getImgsParam();
                 if (!rawImgs) {
                     statusEl.innerText = '❌ ไม่พบข้อมูลรูปภาพ';
-                    subStatusEl.innerText = 'กรุณากดปุ่มส่งรูปภาพใหม่อีกครั้งจากหน้าเว็บ Streamlit';
+                    subStatusEl.innerText = 'กรุณาเลือกรูปภาพในหน้า Streamlit แล้วกดปุ่มส่งใหม่อีกครั้ง';
                     loaderEl.style.display = 'none';
                     return;
                 }
 
-                // 2. เริ่มต้นระบบ LIFF
-                statusEl.innerText = 'กำลังเชื่อมต่อระบบ LINE...';
+                // 2. เริ่มต้น LIFF
+                statusEl.innerText = 'กำลังเชื่อมต่อกับ LINE...';
                 await liff.init({ liffId: LIFF_ID });
 
-                // 3. เช็กการเข้าสู่ระบบ (กรณีเปิดบน PC)
+                // 3. เช็กการเข้าสู่ระบบ (กรณีใช้บน PC)
                 if (!liff.isLoggedIn()) {
                     statusEl.innerText = 'กรุณาเข้าสู่ระบบ LINE';
                     subStatusEl.innerText = 'เพื่อเลือกกลุ่มที่ต้องการส่งรูปภาพ';
@@ -73,18 +80,20 @@
                     return;
                 }
 
-                // 4. แปลงข้อมูลและเตรียมข้อความรูปภาพ
-                const imgUrls = JSON.parse(decodeURIComponent(rawImgs));
+                // 4. แปลงข้อมูล JSON รูปภาพ
+                let imgUrls = JSON.parse(rawImgs);
+                if (typeof imgUrls === 'string') imgUrls = [imgUrls];
+
                 const messages = imgUrls.slice(0, 5).map(url => ({
                     type: 'image',
                     originalContentUrl: url,
                     previewImageUrl: url
                 }));
 
-                // 5. เรียกเปิดหน้าเลือกกลุ่ม LINE
+                // 5. เปิดหน้าเลือกกลุ่ม LINE
                 if (liff.isApiAvailable('shareTargetPicker')) {
                     statusEl.innerText = 'กำลังเปิดหน้าเลือกกลุ่ม LINE...';
-                    subStatusEl.innerText = 'เลือกกลุ่มที่ต้องการส่งรูปภาพ';
+                    subStatusEl.innerText = 'โปรดเลือกกลุ่มที่ต้องการส่งรูปภาพ';
                     
                     const res = await liff.shareTargetPicker(messages);
                     if (res) {
@@ -94,12 +103,12 @@
                         setTimeout(() => { liff.closeWindow(); }, 1500);
                     } else {
                         statusEl.innerText = 'ยกเลิกการส่งรูปภาพ';
-                        subStatusEl.innerText = 'ท่านกดปิดหรือยกเลิกการเลือกกลุ่ม';
+                        subStatusEl.innerText = 'ท่านกดปิดหน้าต่างเลือกกลุ่ม';
                         loaderEl.style.display = 'none';
                     }
                 } else {
-                    statusEl.innerText = '⚠️ เปิดหน้าเลือกกลุ่มไม่ได้';
-                    subStatusEl.innerText = 'กรุณาเช็กสิทธิ์ Share Target Picker ใน LINE Developers Console';
+                    statusEl.innerText = '⚠️ ไม่สามารถเปิดหน้าเลือกกลุ่มได้';
+                    subStatusEl.innerText = 'โปรดตรวจสอบสิทธิ์ Share Target Picker ใน LINE Console';
                     loaderEl.style.display = 'none';
                 }
             } catch (err) {
