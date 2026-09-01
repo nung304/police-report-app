@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ส่งรูปภาพเข้ากลุ่ม LINE</title>
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; padding: 50px 20px; background: #f8fafc; color: #1e293b; }
+        .card { background: white; padding: 30px; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); display: inline-block; max-width: 90%; }
+        .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #06C755; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 15px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div id="loader" class="spinner"></div>
+        <h3 id="status">กำลังเชื่อมต่อกับ LINE...</h3>
+    </div>
+
+    <script>
+        const LIFF_ID = "2011360956-IXDp4ofU";
+
+        async function main() {
+            const statusEl = document.getElementById('status');
+            const loaderEl = document.getElementById('loader');
+            try {
+                await liff.init({ liffId: LIFF_ID });
+
+                if (!liff.isLoggedIn()) {
+                    liff.login();
+                    return;
+                }
+
+                const urlParams = new URLSearchParams(window.location.search);
+                const imgsParam = urlParams.get('imgs');
+
+                if (!imgsParam) {
+                    statusEl.innerText = '❌ ไม่พบข้อมูลรูปภาพ';
+                    loaderEl.style.display = 'none';
+                    return;
+                }
+
+                const imgUrls = JSON.parse(decodeURIComponent(imgsParam));
+                const messages = imgUrls.slice(0, 5).map(url => ({
+                    type: 'image',
+                    originalContentUrl: url,
+                    previewImageUrl: url
+                }));
+
+                if (liff.isApiAvailable('shareTargetPicker')) {
+                    statusEl.innerText = 'กำลังเปิดหน้าเลือกกลุ่ม LINE...';
+                    const res = await liff.shareTargetPicker(messages);
+                    if (res) {
+                        statusEl.innerText = '✅ ส่งรูปภาพสำเร็จแล้ว!';
+                        loaderEl.style.display = 'none';
+                        setTimeout(() => { liff.closeWindow(); }, 1200);
+                    } else {
+                        statusEl.innerText = 'ยกเลิกการส่งรูปภาพ';
+                        loaderEl.style.display = 'none';
+                    }
+                } else {
+                    statusEl.innerText = '❌ อุปกรณ์นี้ไม่รองรับ Share Target Picker';
+                    loaderEl.style.display = 'none';
+                }
+            } catch (err) {
+                statusEl.innerText = 'เกิดข้อผิดพลาด: ' + err.message;
+                loaderEl.style.display = 'none';
+            }
+        }
+        main();
+    </script>
+</body>
+</html>
