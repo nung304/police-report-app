@@ -76,6 +76,7 @@ def upload_images_to_cloudinary(uploaded_files, folder_name="police_reports"):
     return uploaded_urls
 
 
+@st.cache_data(ttl=60)
 def get_cloudinary_images(folder_name="police_reports"):
     try:
         result = cloudinary.api.resources(
@@ -224,12 +225,14 @@ def render_image_gallery_section(key_prefix="gallery"):
                         st.success(
                             f"✅ อัปโหลดรูปภาพสำเร็จจำนวน {len(urls)} รูป!"
                         )
+                        get_cloudinary_images.clear()  # ล้าง Cache เพื่อดึงรูปใหม่ทันที
                         time.sleep(1)
                         st.rerun()
 
     col_title, col_ref = st.columns([4, 1])
     with col_ref:
         if st.button("🔄 รีเฟรชรูป", key=f"{key_prefix}_refresh"):
+            get_cloudinary_images.clear()
             st.rerun()
 
     images_list = get_cloudinary_images()
@@ -394,6 +397,7 @@ def get_rank_priority(rank_str):
     return ranks_priority.get(rank_str.strip(), 99)
 
 
+@st.cache_data(ttl=300)
 def load_personnel():
     docs = db.collection("personnel").stream()
     personnel = []
@@ -442,12 +446,19 @@ def load_personnel():
         ]
         for p in default_p:
             db.collection("personnel").add(p)
-        st.rerun()
+
+        docs = db.collection("personnel").stream()
+        personnel = []
+        for doc in docs:
+            p_data = doc.to_dict()
+            p_data["id"] = doc.id
+            personnel.append(p_data)
 
     personnel.sort(key=lambda x: get_rank_priority(x["rank"]))
     return personnel
 
 
+@st.cache_data(ttl=300)
 def load_tasks():
     docs = db.collection("tasks").stream()
     tasks = []
@@ -475,7 +486,13 @@ def load_tasks():
         ]
         for t in default_tasks:
             db.collection("tasks").add({"task_detail": t})
-        st.rerun()
+
+        docs = db.collection("tasks").stream()
+        tasks = []
+        for doc in docs:
+            t_data = doc.to_dict()
+            t_data["id"] = doc.id
+            tasks.append(t_data)
     return tasks
 
 
@@ -654,6 +671,7 @@ with tab1:
                                 new_text = task_detail_t2.strip()
                                 if new_text not in raw_tasks_list:
                                     db.collection("tasks").add({"task_detail": new_text})
+                                    load_tasks.clear()  # ล้าง Cache เพื่อดึงภารกิจใหม่ทันที
                                     st.toast(
                                         "🎉 บันทึกภารกิจเรื่องใหม่เข้าคลังสำเร็จ!", icon="💾"
                                     )
@@ -779,7 +797,7 @@ with tab2:
                 if selected_task:
                     processed_task = selected_task
                     if processed_task.startswith("ได้นำ"):
-                        processed_task = processed_task.replace("ไฟล์นำ", "นำ", 1)
+                        processed_task = processed_task.replace("ได้นำ", "นำ", 1)
                     all_task_details.append(processed_task)
 
             final_tasks_text = ""
@@ -794,14 +812,11 @@ with tab2:
         with st.container(border=True):
             st.markdown("### 📋 ข้อความรายงานสำหรับส่ง Line")
 
-            report_text = f"""สภ.ไม้แก่น 
-งานสอบสวน
-เรียน ผู้บังคับบัญชา
-เมื่อ {date_str} เวลาประมาณ {time_str} น.
-{main_officer['rank']}{main_officer['name']}
-{main_officer['position']}{suffix}{team_member_lines}
-{final_tasks_text}
-   จึงเรียนมาเพื่อโปรดทราบ"""
+            report_text = (
+                f"สภ.ไม้แก่น \nงานสอบสวน\nเรียน ผู้บังคับบัญชา\nเมื่อ {date_str} เวลาประมาณ {time_str} น.\n"
+                f"{main_officer['rank']}{main_officer['name']}\n{main_officer['position']}{suffix}{team_member_lines}\n"
+                f"{final_tasks_text}\nจึงเรียนมาเพื่อโปรดทราบ"
+            )
 
             st.code(report_text, language="text")
 
