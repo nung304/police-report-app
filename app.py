@@ -62,7 +62,34 @@ def get_firestore_client():
 db = get_firestore_client()
 
 
-# --- 4. ฟังก์ชันฝากรูปและคลังรูปภาพ ---
+# --- 4. ฟังก์ชันบันทึกและดึงข้อมูลรายงานรายวัน (Daily Reports Database) ---
+@st.cache_data(ttl=10)
+def load_daily_report(date_key):
+    """ดึงข้อมูลรายงานประจำวันที่บันทึกไว้ใน Firestore"""
+    try:
+        doc = db.collection("daily_reports").document(date_key).get()
+        if doc.exists:
+            return doc.to_dict()
+    except Exception as e:
+        st.error(f"❌ ไม่สามารถดึงข้อมูลรายงานประจำวันได้: {e}")
+    return None
+
+
+def save_daily_report(date_key, report_data):
+    """บันทึกข้อมูลรายงานประจำลง Firestore"""
+    try:
+        report_data["updated_at"] = datetime.now()
+        db.collection("daily_reports").document(date_key).set(
+            report_data, merge=True
+        )
+        load_daily_report.clear()
+        return True
+    except Exception as e:
+        st.error(f"❌ บันทึกข้อมูลรายงานไม่สำเร็จ: {e}")
+        return False
+
+
+# --- 5. ฟังก์ชันฝากรูปและคลังรูปภาพ ---
 def upload_images_to_cloudinary(uploaded_files, folder_name="police_reports"):
     uploaded_urls = []
     for file in uploaded_files:
@@ -95,7 +122,7 @@ def get_cloudinary_images(folder_name="police_reports"):
         return []
 
 
-# --- 5. ฟังก์ชันส่งข้อความและรูปภาพ LINE OA (Push API) ---
+# --- 6. ฟังก์ชันส่งข้อความและรูปภาพ LINE OA (Push API) ---
 def send_line_oa_push(message_text):
     try:
         line_secrets = st.secrets["line"]
@@ -118,7 +145,6 @@ def send_line_oa_push(message_text):
 
 
 def send_line_oa_images(image_urls):
-    """ส่งรูปภาพเข้ากลุ่ม LINE ผ่าน Push API โดยตรง (รองรับสูงสุดรอบละ 5 รูปตามเกณฑ์ LINE API)"""
     try:
         line_secrets = st.secrets["line"]
         token = line_secrets["channel_access_token"]
@@ -157,7 +183,7 @@ def send_line_oa_images(image_urls):
         return False, str(e)
 
 
-# --- 6. Component ปุ่มส่งรูปภาพ (รองรับทั้ง LINE OA Direct Push และ LIFF) ---
+# --- 7. Component ปุ่มส่งรูปภาพ ---
 def render_liff_send_button(image_urls, key_suffix=""):
     if not image_urls:
         return
@@ -173,7 +199,6 @@ def render_liff_send_button(image_urls, key_suffix=""):
         f"#### 📤 การส่งรูปภาพทั้งหมด {total_images} รูป (แบ่งเป็น {total_batches} ชุด)"
     )
 
-    # ปุ่มส่งตรงผ่าน LINE OA (กดปุ่มเดียวส่งเข้ากลุ่มทันที ไม่ต้องเปิดหน้าใหม่)
     if st.button(
         f"🚀 ส่งรูปภาพ {total_images} รูป เข้ากลุ่ม LINE ทันที (ผ่าน LINE OA)",
         key=f"{key_suffix}_btn_push_imgs",
@@ -202,7 +227,6 @@ def render_liff_send_button(image_urls, key_suffix=""):
         )
 
 
-# Component แสดงคลังรูปภาพ
 def render_image_gallery_section(key_prefix="gallery"):
     st.markdown("### 🖼️ เลือกรูปภาพจากคลังเพื่อส่งเข้า LINE")
 
@@ -225,7 +249,7 @@ def render_image_gallery_section(key_prefix="gallery"):
                         st.success(
                             f"✅ อัปโหลดรูปภาพสำเร็จจำนวน {len(urls)} รูป!"
                         )
-                        get_cloudinary_images.clear()  # ล้าง Cache เพื่อดึงรูปใหม่ทันที
+                        get_cloudinary_images.clear()
                         time.sleep(1)
                         st.rerun()
 
@@ -277,7 +301,7 @@ def render_image_gallery_section(key_prefix="gallery"):
             render_liff_send_button(selected_urls, key_suffix=key_prefix)
 
 
-# --- 7. จัดแต่ง CSS หน้าตาเว็บ ---
+# --- 8. จัดแต่ง CSS หน้าตาเว็บ ---
 st.markdown(
     """
     <style>
@@ -331,29 +355,6 @@ st.markdown(
                 background-color: #0f172a !important;
             }
         }
-        
-        .stButton>button {
-            width: 100%;
-            border-radius: 10px;
-            height: 3em;
-            background-color: #0c2340 !important;
-            color: white !important;
-            font-weight: bold;
-            border: none;
-            transition: 0.3s;
-        }
-        .stButton>button:hover {
-            background-color: #1d3557 !important;
-        }
-        @media (prefers-color-scheme: dark) {
-            .stButton>button {
-                background-color: #38bdf8 !important;
-                color: #0f172a !important;
-            }
-            .stButton>button:hover {
-                background-color: #7dd3fc !important;
-            }
-        }
 
         .main-title { text-align: center; color: #0c2340; font-weight: bold; margin-bottom: 0; }
         .main-subtitle { text-align: center; color: #666666; font-size: 0.95rem; margin-bottom: 25px; }
@@ -376,7 +377,7 @@ st.markdown(
 )
 
 
-# --- 8. โหลด/บันทึก ข้อมูลตำรวจและคลังภารกิจ ---
+# --- 9. โหลดข้อมูลตำรวจและคลังภารกิจ ---
 def get_rank_priority(rank_str):
     ranks_priority = {
         "พล.ต.อ.": 1,
@@ -525,8 +526,11 @@ for p in personnel_list:
 
 raw_tasks_list = [t["task_detail"] for t in tasks_data]
 
-st.markdown("##### 📅 เลือกวันที่สำหรับการรายงาน")
+# --- 10. ระบบเลือกวันที่และดึงข้อมูลรายงานย้อนหลัง ---
+st.markdown("##### 📅 เลือกวันที่สำหรับการรายงาน / ดูประวัติ")
 date_input = st.date_input("เลือกวันที่", datetime.now(), key="global_date_input")
+date_key = date_input.strftime("%Y-%m-%d")
+
 months_th = [
     "ม.ค.",
     "ก.พ.",
@@ -544,9 +548,24 @@ months_th = [
 year_th = str(date_input.year + 543)[2:]
 date_str = f"{date_input.day} {months_th[date_input.month-1]}{year_th}"
 
+# โหลดข้อมูลรายงานที่เคยบันทึกไว้ใน Firestore ตามวันที่เลือก
+saved_report_data = load_daily_report(date_key)
+
+if saved_report_data:
+    st.success(
+        f"📂 **พบประวัติข้อมูลรายงานประจำวันที่ {date_str} ในฐานข้อมูล**"
+        f" (อัปเดตล่าสุด:"
+        f" {saved_report_data.get('updated_at', datetime.now()).strftime('%H:%M น.')})"
+    )
+else:
+    st.info(
+        f"ℹ️ **ยังไม่มีข้อมูลบันทึกรายงานประจำวันที่ {date_str}**"
+        " (สามารถพิมพ์ป้อนข้อมูล และกดปุ่มบันทึกได้ด้านล่าง)"
+    )
+
 st.markdown("---")
 
-# --- 9. หน้าสร้างรายงาน LINE ---
+# --- 11. หน้าสร้าง/แสดงรายงาน LINE ---
 tab1, tab2 = st.tabs([
     "📝 1. รายงานสรุปผลการปฏิบัติประจำวัน (แยกคน/เวลา/ภารกิจ)",
     "👮‍♂️ 2. รายงานรูปแบบเดิม (เดี่ยว/พร้อมพวก)",
@@ -558,9 +577,22 @@ with tab1:
     with t2_col1:
         with st.container(border=True):
             st.markdown("### 🔍 เลือกร้อยเวรสอบสวนประจำวัน")
+
+            saved_inspector = (
+                saved_report_data.get("selected_inspector", "")
+                if saved_report_data
+                else ""
+            )
+            inspector_default_idx = 0
+            if saved_inspector in list(inspector_options.keys()):
+                inspector_default_idx = (
+                    list(inspector_options.keys()).index(saved_inspector) + 1
+                )
+
             selected_inspector = st.selectbox(
                 "👮‍♂️ เลือกรายชื่อร้อยเวรสอบสวนปฏิบัติหน้าที่วันนี้",
                 options=[""] + list(inspector_options.keys()),
+                index=inspector_default_idx,
                 key="t2_inspector_select",
             )
 
@@ -572,9 +604,14 @@ with tab1:
                 )
 
             st.markdown("### 📝 รายการภารกิจผู้ปฏิบัติงาน")
+            saved_nocases = (
+                saved_report_data.get("no_cases", False)
+                if saved_report_data
+                else False
+            )
             no_cases = st.checkbox(
                 "❌ วันนี้ไม่มีประชาชนมาแจ้งความหรือลงบันทึกประจำวัน (เหตุการณ์ปกติ)",
-                value=False,
+                value=saved_nocases,
                 key="t2_no_cases",
             )
 
@@ -671,7 +708,7 @@ with tab1:
                                 new_text = task_detail_t2.strip()
                                 if new_text not in raw_tasks_list:
                                     db.collection("tasks").add({"task_detail": new_text})
-                                    load_tasks.clear()  # ล้าง Cache เพื่อดึงภารกิจใหม่ทันที
+                                    load_tasks.clear()
                                     st.toast(
                                         "🎉 บันทึกภารกิจเรื่องใหม่เข้าคลังสำเร็จ!", icon="💾"
                                     )
@@ -695,6 +732,7 @@ with tab1:
         with st.container(border=True):
             st.markdown("### 📋 ข้อความสรุปรวม Line")
 
+            # ถ้ามีข้อมูลที่เคยบันทึกไว้ และข้อความสร้างใหม่ว่าง ให้ดึงข้อความเก่ามาโชว์
             if no_cases:
                 final_text_t2 = (
                     f"สภ.ไม้แก่น \nงานสอบสวน\nเรียนผู้บังคับบัญชา\nรายงานสรุปผลการปฏิบัติประจำวันที่"
@@ -707,15 +745,49 @@ with tab1:
                     f" {date_str}\n{inspector_text_block}{joined_items_t2}\n\nจึงเรียนมาเพื่อโปรดทราบ"
                 )
 
+            if saved_report_data and "report_text_tab1" in saved_report_data and not report_items_t2 and not no_cases:
+                final_text_t2 = saved_report_data["report_text_tab1"]
+
             st.code(final_text_t2, language="text")
 
-            if st.button("🚀 ส่งรายงานเข้ากลุ่ม LINE ทันที (LINE OA)", key="btn_send_line_t1"):
-                with st.spinner("กำลังส่งรายงานเข้ากลุ่ม LINE..."):
-                    success, err_msg = send_line_oa_push(final_text_t2)
-                    if success:
-                        st.success("✅ ส่งรายงานเข้ากลุ่ม LINE เรียบร้อยแล้ว!")
-                    else:
-                        st.error(f"❌ ส่งข้อความไม่สำเร็จ: {err_msg}")
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                if st.button("💾 บันทึกข้อมูลลงฐานข้อมูล", key="btn_save_db_t1"):
+                    data_to_save = {
+                        "date_key": date_key,
+                        "date_str": date_str,
+                        "selected_inspector": selected_inspector,
+                        "no_cases": no_cases,
+                        "report_text_tab1": final_text_t2,
+                    }
+                    if save_daily_report(date_key, data_to_save):
+                        st.toast(
+                            f"✅ บันทึกรายงานประจำวันที่ {date_str} ลงฐานข้อมูลเรียบร้อยแล้ว!",
+                            icon="💾",
+                        )
+                        time.sleep(1)
+                        st.rerun()
+
+            with col_btn2:
+                if st.button(
+                    "🚀 ส่ง LINE + บันทึกข้อมูล", key="btn_send_line_t1"
+                ):
+                    with st.spinner("กำลังส่งรายงานเข้ากลุ่ม LINE..."):
+                        success, err_msg = send_line_oa_push(final_text_t2)
+                        if success:
+                            data_to_save = {
+                                "date_key": date_key,
+                                "date_str": date_str,
+                                "selected_inspector": selected_inspector,
+                                "no_cases": no_cases,
+                                "report_text_tab1": final_text_t2,
+                            }
+                            save_daily_report(date_key, data_to_save)
+                            st.success(
+                                "✅ ส่งรายงานเข้ากลุ่ม LINE และบันทึกลงฐานข้อมูลเรียบร้อย!"
+                            )
+                        else:
+                            st.error(f"❌ ส่งข้อความไม่สำเร็จ: {err_msg}")
 
     st.markdown("---")
     render_image_gallery_section(key_prefix="tab1_gallery")
@@ -818,15 +890,45 @@ with tab2:
                 f"{final_tasks_text}\nจึงเรียนมาเพื่อโปรดทราบ"
             )
 
+            if saved_report_data and "report_text_tab2" in saved_report_data and not valid_tasks:
+                report_text = saved_report_data["report_text_tab2"]
+
             st.code(report_text, language="text")
 
-            if st.button("🚀 ส่งรายงานเข้ากลุ่ม LINE ทันที (LINE OA)", key="btn_send_line_t2"):
-                with st.spinner("กำลังส่งรายงานเข้ากลุ่ม LINE..."):
-                    success, err_msg = send_line_oa_push(report_text)
-                    if success:
-                        st.success("✅ ส่งรายงานเข้ากลุ่ม LINE เรียบร้อยแล้ว!")
-                    else:
-                        st.error(f"❌ ส่งข้อความไม่สำเร็จ: {err_msg}")
+            col_btn3, col_btn4 = st.columns(2)
+            with col_btn3:
+                if st.button("💾 บันทึกข้อมูลลงฐานข้อมูล", key="btn_save_db_t2"):
+                    data_to_save = {
+                        "date_key": date_key,
+                        "date_str": date_str,
+                        "report_text_tab2": report_text,
+                    }
+                    if save_daily_report(date_key, data_to_save):
+                        st.toast(
+                            f"✅ บันทึกรายงานประจำวันที่ {date_str} ลงฐานข้อมูลเรียบร้อยแล้ว!",
+                            icon="💾",
+                        )
+                        time.sleep(1)
+                        st.rerun()
+
+            with col_btn4:
+                if st.button(
+                    "🚀 ส่ง LINE + บันทึกข้อมูล", key="btn_send_line_t2"
+                ):
+                    with st.spinner("กำลังส่งรายงานเข้ากลุ่ม LINE..."):
+                        success, err_msg = send_line_oa_push(report_text)
+                        if success:
+                            data_to_save = {
+                                "date_key": date_key,
+                                "date_str": date_str,
+                                "report_text_tab2": report_text,
+                            }
+                            save_daily_report(date_key, data_to_save)
+                            st.success(
+                                "✅ ส่งรายงานเข้ากลุ่ม LINE และบันทึกลงฐานข้อมูลเรียบร้อย!"
+                            )
+                        else:
+                            st.error(f"❌ ส่งข้อความไม่สำเร็จ: {err_msg}")
 
     st.markdown("---")
     render_image_gallery_section(key_prefix="tab2_gallery")
