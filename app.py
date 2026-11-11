@@ -726,14 +726,16 @@ with tab3:
     
     col_db1, col_db2 = st.columns(2)
     
+    ranks_list = ["พล.ต.อ.", "พล.ต.ท.", "พล.ต.ต.", "พ.ต.อ.", "พ.ต.ท.", "พ.ต.ต.", "ร.ต.อ.", "ร.ต.ท.", "ร.ต.ต.", "ด.ต.", "จ.ส.ต.", "ส.ต.อ.", "ส.ต.ท.", "ส.ต.ต."]
+
     with col_db1:
         with st.container(border=True):
             st.markdown("### 👮‍♂️ เพิ่มรายชื่อข้าราชการตำรวจใหม่")
-            new_rank = st.selectbox("ยศ", ["พ.ต.ท.", "ร.ต.อ.", "ร.ต.ท.", "ร.ต.ต.", "ด.ต.", "จ.ส.ต.", "ส.ต.อ.", "ส.ต.ท.", "ส.ต.ต."], key="admin_rank")
+            new_rank = st.selectbox("ยศ", ranks_list, key="admin_rank")
             new_name = st.text_input("ชื่อ-นามสกุล", key="admin_name")
             new_pos = st.text_input("ตำแหน่ง/สังกัด", key="admin_pos")
             
-            if st.button("💾 บันทึกรายชื่อตำรวจ", key="btn_add_officer"):
+            if st.button("💾 บันทึกรายชื่อตำรวจใหม่", key="btn_add_officer"):
                 if new_name and new_pos:
                     db.collection("personnel").add({
                         "rank": new_rank,
@@ -748,16 +750,36 @@ with tab3:
                     st.warning("⚠️ กรุณากรอกชื่อและตำแหน่งให้ครบถ้วน")
             
             st.markdown("---")
-            st.markdown("#### 📋 รายชื่อตำรวจปัจจุบันในระบบ")
+            st.markdown("#### 📋 รายชื่อตำรวจปัจจุบันในระบบ (แก้ไข / ลบ)")
             for p in personnel_list:
-                c1, c2 = st.columns([4, 1])
+                c1, c2, c3 = st.columns([3, 1, 1])
                 with c1:
-                    st.text(f"{p['rank']}{p['name']} ({p['position']})")
+                    st.write(f"**{p['rank']}{p['name']}**\n\n`{p['position']}`")
                 with c2:
+                    # ปุ่มแก้ไขรายชื่อตำรวจ (ใช้ Popover)
+                    with st.popover("✏️ แก้ไข", key=f"pop_edit_p_{p['id']}"):
+                        st.markdown(f"**แก้ไขข้อมูล: {p['rank']}{p['name']}**")
+                        edit_rank_idx = ranks_list.index(p['rank']) if p['rank'] in ranks_list else 0
+                        edit_rank = st.selectbox("ยศ", ranks_list, index=edit_rank_idx, key=f"edit_rank_{p['id']}")
+                        edit_name = st.text_input("ชื่อ-นามสกุล", value=p['name'], key=f"edit_name_{p['id']}")
+                        edit_pos = st.text_input("ตำแหน่ง/สังกัด", value=p['position'], key=f"edit_pos_{p['id']}")
+                        
+                        if st.button("💾 บันทึกการแก้ไข", key=f"btn_save_p_{p['id']}"):
+                            db.collection("personnel").document(p['id']).update({
+                                "rank": edit_rank,
+                                "name": edit_name.strip(),
+                                "position": edit_pos.strip()
+                            })
+                            load_personnel.clear()
+                            st.toast("✅ อัปเดตข้อมูลสำเร็จ!", icon="💾")
+                            time.sleep(1)
+                            st.rerun()
+                with c3:
                     if st.button("🗑️ ลบ", key=f"del_p_{p['id']}"):
                         db.collection("personnel").document(p['id']).delete()
                         load_personnel.clear()
                         st.rerun()
+                st.divider()
 
     with col_db2:
         with st.container(border=True):
@@ -777,13 +799,29 @@ with tab3:
                     st.warning("⚠️ กรุณากรอกรายละเอียดภารกิจ")
             
             st.markdown("---")
-            st.markdown("#### 📋 หัวข้อภารกิจในคลังปัจจุบัน")
+            st.markdown("#### 📋 หัวข้อภารกิจในคลังปัจจุบัน (แก้ไข / ลบ)")
             for t in tasks_data:
-                c1, c2 = st.columns([4, 1])
+                c1, c2, c3 = st.columns([3, 1, 1])
                 with c1:
-                    st.text(t['task_detail'])
+                    st.write(t['task_detail'])
                 with c2:
+                    # ปุ่มแก้ไขภารกิจ (ใช้ Popover)
+                    with st.popover("✏️ แก้ไข", key=f"pop_edit_t_{t['id']}"):
+                        st.markdown("**แก้ไขข้อความภารกิจ**")
+                        edit_task_text = st.text_area("รายละเอียดภารกิจ", value=t['task_detail'], key=f"edit_t_text_{t['id']}")
+                        
+                        if st.button("💾 บันทึกการแก้ไข", key=f"btn_save_t_{t['id']}"):
+                            if edit_task_text.strip():
+                                db.collection("tasks").document(t['id']).update({
+                                    "task_detail": edit_task_text.strip()
+                                })
+                                load_tasks.clear()
+                                st.toast("✅ อัปเดตข้อความภารกิจสำเร็จ!", icon="💾")
+                                time.sleep(1)
+                                st.rerun()
+                with c3:
                     if st.button("🗑️ ลบ", key=f"del_t_{t['id']}"):
                         db.collection("tasks").document(t['id']).delete()
                         load_tasks.clear()
                         st.rerun()
+                st.divider()
