@@ -1,11 +1,6 @@
 from datetime import datetime
-import io
 import json
 import time
-import urllib.parse
-import cloudinary
-import cloudinary.api
-import cloudinary.uploader
 from google.cloud import firestore
 from google.oauth2 import service_account
 import requests
@@ -18,9 +13,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
-
-# ** ดึง LIFF ID จาก Secrets **
-LIFF_ID = st.secrets.get("line", {}).get("liff_id", "2011360956-IXDp4ofU")
 
 # --- 2. ส่ง Meta Tags สำหรับ LINE ---
 st.html(
@@ -37,15 +29,7 @@ st.html(
     """
 )
 
-# --- 3. เชื่อมต่อ Cloudinary & Firestore ---
-cloudinary.config(
-    cloud_name=st.secrets["cloudinary"]["cloud_name"],
-    api_key=st.secrets["cloudinary"]["api_key"],
-    api_secret=st.secrets["cloudinary"]["api_secret"],
-    secure=True,
-)
-
-
+# --- 3. เชื่อมต่อ Firestore ---
 @st.cache_resource
 def get_firestore_client():
     cred_dict = dict(st.secrets["firebase"])
@@ -89,40 +73,7 @@ def save_daily_report(date_key, report_data):
         return False
 
 
-# --- 5. ฟังก์ชันฝากรูปและคลังรูปภาพ ---
-def upload_images_to_cloudinary(uploaded_files, folder_name="police_reports"):
-    uploaded_urls = []
-    for file in uploaded_files:
-        try:
-            response = cloudinary.uploader.upload(
-                file, folder=folder_name, resource_type="image"
-            )
-            uploaded_urls.append(response.get("secure_url"))
-        except Exception as e:
-            st.error(f"❌ เกิดข้อผิดพลาดกับไฟล์ {file.name}: {e}")
-    return uploaded_urls
-
-
-@st.cache_data(ttl=60)
-def get_cloudinary_images(folder_name="police_reports"):
-    try:
-        result = cloudinary.api.resources(
-            type="upload", prefix=folder_name, max_results=100
-        )
-        images = []
-        for resource in result.get("resources", []):
-            images.append({
-                "public_id": resource["public_id"],
-                "url": resource["secure_url"],
-                "created_at": resource["created_at"],
-            })
-        return images
-    except Exception as e:
-        st.error(f"❌ ไม่สามารถดึงข้อมูลคลังรูปภาพได้: {e}")
-        return []
-
-
-# --- 6. ฟังก์ชันส่งข้อความและรูปภาพ LINE OA (Push API) ---
+# --- 5. ฟังก์ชันส่งข้อความ LINE OA (Push API) ---
 def send_line_oa_push(message_text):
     try:
         line_secrets = st.secrets["line"]
@@ -144,164 +95,7 @@ def send_line_oa_push(message_text):
         return False, str(e)
 
 
-def send_line_oa_images(image_urls):
-    try:
-        line_secrets = st.secrets["line"]
-        token = line_secrets["channel_access_token"]
-        group_id = line_secrets["group_id"]
-
-        url = "https://api.line.me/v2/bot/message/push"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}",
-        }
-
-        def chunk_list(lst, n=5):
-            return [lst[i : i + n] for i in range(0, len(lst), n)]
-
-        batches = chunk_list(image_urls, 5)
-        success_count = 0
-
-        for batch in batches:
-            messages = [
-                {
-                    "type": "image",
-                    "originalContentUrl": img_url,
-                    "previewImageUrl": img_url,
-                }
-                for img_url in batch
-            ]
-            payload = {"to": group_id, "messages": messages}
-            res = requests.post(url, headers=headers, json=payload, timeout=10)
-            if res.status_code == 200:
-                success_count += len(batch)
-            else:
-                return False, f"HTTP {res.status_code}: {res.text}"
-
-        return True, f"ส่งรูปภาพสำเร็จทั้งหมด {success_count} รูป"
-    except Exception as e:
-        return False, str(e)
-
-
-# --- 7. Component ปุ่มส่งรูปภาพ ---
-def render_liff_send_button(image_urls, key_suffix=""):
-    if not image_urls:
-        return
-
-    def chunk_list(lst, n=5):
-        return [lst[i : i + n] for i in range(0, len(lst), n)]
-
-    batches = chunk_list(image_urls, 5)
-    total_images = len(image_urls)
-    total_batches = len(batches)
-
-    st.markdown(
-        f"#### 📤 การส่งรูปภาพทั้งหมด {total_images} รูป (แบ่งเป็น {total_batches} ชุด)"
-    )
-
-    if st.button(
-        f"🚀 ส่งรูปภาพ {total_images} รูป เข้ากลุ่ม LINE ทันที (ผ่าน LINE OA)",
-        key=f"{key_suffix}_btn_push_imgs",
-        use_container_width=True,
-    ):
-        with st.spinner("📸 กำลังส่งรูปภาพเข้ากลุ่ม LINE..."):
-            ok, msg = send_line_oa_images(image_urls)
-            if ok:
-                st.success(f"✅ {msg}")
-            else:
-                st.error(f"❌ ส่งรูปภาพไม่สำเร็จ: {msg}")
-
-    st.markdown("**หรือเลือกส่งผ่านแอป LINE (LIFF):**")
-
-    for idx, batch in enumerate(batches):
-        start_idx = idx * 5 + 1
-        end_idx = start_idx + len(batch) - 1
-
-        encoded_urls = urllib.parse.quote(json.dumps(batch))
-        target_liff_url = f"https://liff.line.me/{LIFF_ID}?imgs={encoded_urls}"
-
-        st.link_button(
-            f"🟢 ชุดที่ {idx+1}/{total_batches}: ส่งรูปที่ {start_idx} - {end_idx} ผ่าน LIFF",
-            target_liff_url,
-            use_container_width=True,
-        )
-
-
-def render_image_gallery_section(key_prefix="gallery"):
-    st.markdown("### 🖼️ เลือกรูปภาพจากคลังเพื่อส่งเข้า LINE")
-
-    with st.expander("📤 อัปโหลดรูปภาพใหม่เข้าคลังถาวร", expanded=False):
-        uploaded_photos = st.file_uploader(
-            "📂 เลือกรูปภาพ (เลือกพร้อมกันได้หลายรูป)",
-            type=["png", "jpg", "jpeg", "webp"],
-            accept_multiple_files=True,
-            key=f"{key_prefix}_uploader",
-        )
-        if uploaded_photos:
-            if st.button(
-                "📤 เริ่มอัปโหลดเข้าคลัง",
-                key=f"{key_prefix}_btn_upload",
-                use_container_width=True,
-            ):
-                with st.spinner("⏳ กำลังอัปโหลดรูปภาพ..."):
-                    urls = upload_images_to_cloudinary(uploaded_photos)
-                    if urls:
-                        st.success(
-                            f"✅ อัปโหลดรูปภาพสำเร็จจำนวน {len(urls)} รูป!"
-                        )
-                        get_cloudinary_images.clear()
-                        time.sleep(1)
-                        st.rerun()
-
-    col_title, col_ref = st.columns([4, 1])
-    with col_ref:
-        if st.button("🔄 รีเฟรชรูป", key=f"{key_prefix}_refresh"):
-            get_cloudinary_images.clear()
-            st.rerun()
-
-    images_list = get_cloudinary_images()
-    if not images_list:
-        st.info("ยังไม่มีรูปภาพในคลัง")
-    else:
-        st.markdown(
-            """
-            <style>
-                .thumb-container img {
-                    height: 110px !important;
-                    object-fit: cover !important;
-                    border-radius: 8px !important;
-                    border: 1px solid #cbd5e1 !important;
-                }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        cols = st.columns(6)
-        selected_urls = []
-
-        for idx, img in enumerate(images_list):
-            with cols[idx % 6]:
-                st.markdown(
-                    '<div class="thumb-container">', unsafe_allow_html=True
-                )
-                st.image(img["url"], use_container_width=True)
-                st.markdown("</div>", unsafe_allow_html=True)
-                is_selected = st.checkbox(
-                    f"☑️ รูปที่ {idx+1}", key=f"{key_prefix}_check_{idx}"
-                )
-                if is_selected:
-                    selected_urls.append(img["url"])
-
-        if selected_urls:
-            st.markdown("---")
-            st.markdown(
-                f"**📌 เลือกไว้ทั้งหมดจำนวน {len(selected_urls)} รูป**"
-            )
-            render_liff_send_button(selected_urls, key_suffix=key_prefix)
-
-
-# --- 8. จัดแต่ง CSS หน้าตาเว็บ ---
+# --- 6. จัดแต่ง CSS หน้าตาเว็บ ---
 st.markdown(
     """
     <style>
@@ -377,7 +171,7 @@ st.markdown(
 )
 
 
-# --- 9. โหลดข้อมูลตำรวจและคลังภารกิจ ---
+# --- 7. โหลดข้อมูลตำรวจและคลังภารกิจ ---
 def get_rank_priority(rank_str):
     ranks_priority = {
         "พล.ต.อ.": 1,
@@ -526,7 +320,7 @@ for p in personnel_list:
 
 raw_tasks_list = [t["task_detail"] for t in tasks_data]
 
-# --- 10. ระบบเลือกวันที่และดึงข้อมูลรายงานย้อนหลัง ---
+# --- 8. ระบบเลือกวันที่และดึงข้อมูลรายงานย้อนหลัง ---
 st.markdown("##### 📅 เลือกวันที่สำหรับการรายงาน / ดูประวัติ")
 date_input = st.date_input("เลือกวันที่", datetime.now(), key="global_date_input")
 date_key = date_input.strftime("%Y-%m-%d")
@@ -565,10 +359,11 @@ else:
 
 st.markdown("---")
 
-# --- 11. หน้าสร้าง/แสดงรายงาน LINE ---
-tab1, tab2 = st.tabs([
+# --- 9. หน้าสร้างรายงาน LINE และจัดการฐานข้อมูล ---
+tab1, tab2, tab3 = st.tabs([
     "📝 1. รายงานสรุปผลการปฏิบัติประจำวัน (แยกคน/เวลา/ภารกิจ)",
     "👮‍♂️ 2. รายงานรูปแบบเดิม (เดี่ยว/พร้อมพวก)",
+    "⚙️ 3. จัดการฐานข้อมูล (ตำรวจ & คลังภารกิจ)",
 ])
 
 with tab1:
@@ -732,7 +527,6 @@ with tab1:
         with st.container(border=True):
             st.markdown("### 📋 ข้อความสรุปรวม Line")
 
-            # ถ้ามีข้อมูลที่เคยบันทึกไว้ และข้อความสร้างใหม่ว่าง ให้ดึงข้อความเก่ามาโชว์
             if no_cases:
                 final_text_t2 = (
                     f"สภ.ไม้แก่น \nงานสอบสวน\nเรียนผู้บังคับบัญชา\nรายงานสรุปผลการปฏิบัติประจำวันที่"
@@ -788,9 +582,6 @@ with tab1:
                             )
                         else:
                             st.error(f"❌ ส่งข้อความไม่สำเร็จ: {err_msg}")
-
-    st.markdown("---")
-    render_image_gallery_section(key_prefix="tab1_gallery")
 
 with tab2:
     main_col1, main_col2, main_col3 = st.columns([1, 1, 1.1])
@@ -930,5 +721,69 @@ with tab2:
                         else:
                             st.error(f"❌ ส่งข้อความไม่สำเร็จ: {err_msg}")
 
-    st.markdown("---")
-    render_image_gallery_section(key_prefix="tab2_gallery")
+with tab3:
+    st.subheader("⚙️ จัดการฐานข้อมูล (รายชื่อตำรวจ & คลังภารกิจ)")
+    
+    col_db1, col_db2 = st.columns(2)
+    
+    with col_db1:
+        with st.container(border=True):
+            st.markdown("### 👮‍♂️ เพิ่มรายชื่อข้าราชการตำรวจใหม่")
+            new_rank = st.selectbox("ยศ", ["พ.ต.ท.", "ร.ต.อ.", "ร.ต.ท.", "ร.ต.ต.", "ด.ต.", "จ.ส.ต.", "ส.ต.อ.", "ส.ต.ท.", "ส.ต.ต."], key="admin_rank")
+            new_name = st.text_input("ชื่อ-นามสกุล", key="admin_name")
+            new_pos = st.text_input("ตำแหน่ง/สังกัด", key="admin_pos")
+            
+            if st.button("💾 บันทึกรายชื่อตำรวจ", key="btn_add_officer"):
+                if new_name and new_pos:
+                    db.collection("personnel").add({
+                        "rank": new_rank,
+                        "name": new_name.strip(),
+                        "position": new_pos.strip()
+                    })
+                    load_personnel.clear()
+                    st.success("✅ เพิ่มรายชื่อข้าราชการตำรวจสำเร็จ!")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.warning("⚠️ กรุณากรอกชื่อและตำแหน่งให้ครบถ้วน")
+            
+            st.markdown("---")
+            st.markdown("#### 📋 รายชื่อตำรวจปัจจุบันในระบบ")
+            for p in personnel_list:
+                c1, c2 = st.columns([4, 1])
+                with c1:
+                    st.text(f"{p['rank']}{p['name']} ({p['position']})")
+                with c2:
+                    if st.button("🗑️ ลบ", key=f"del_p_{p['id']}"):
+                        db.collection("personnel").document(p['id']).delete()
+                        load_personnel.clear()
+                        st.rerun()
+
+    with col_db2:
+        with st.container(border=True):
+            st.markdown("### 📝 เพิ่มหัวข้อภารกิจใหม่เข้าคลัง")
+            new_task_input = st.text_area("รายละเอียดภารกิจประจำ", key="admin_task_input")
+            
+            if st.button("💾 บันทึกภารกิจเข้าคลัง", key="btn_add_task"):
+                if new_task_input.strip():
+                    db.collection("tasks").add({
+                        "task_detail": new_task_input.strip()
+                    })
+                    load_tasks.clear()
+                    st.success("✅ เพิ่มหัวข้อภารกิจสำเร็จ!")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.warning("⚠️ กรุณากรอกรายละเอียดภารกิจ")
+            
+            st.markdown("---")
+            st.markdown("#### 📋 หัวข้อภารกิจในคลังปัจจุบัน")
+            for t in tasks_data:
+                c1, c2 = st.columns([4, 1])
+                with c1:
+                    st.text(t['task_detail'])
+                with c2:
+                    if st.button("🗑️ ลบ", key=f"del_t_{t['id']}"):
+                        db.collection("tasks").document(t['id']).delete()
+                        load_tasks.clear()
+                        st.rerun()
